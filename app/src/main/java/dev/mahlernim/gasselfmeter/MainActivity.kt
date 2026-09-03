@@ -1,6 +1,7 @@
 package dev.mahlernim.gasselfmeter
 
 import android.Manifest
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -57,6 +58,15 @@ private val Muted = Color(0xFF526968)
 private val Pale = Color(0xFFE4F0EB)
 fun decimalText(value: Double?, digits: Int = 1): String = value?.let { String.format(Locale.KOREA, "%,.${digits}f", it) } ?: "아직 몰라요"
 
+object AppLinks {
+    const val PLAY_STORE = "market://details?id=dev.mahlernim.gasselfmeter"
+    const val TESTING_PAGE = "https://play.google.com/apps/testing/dev.mahlernim.gasselfmeter"
+    const val TESTER_GROUP = "https://groups.google.com/g/gas-self-meter-ai"
+    const val PRIVACY = "https://github.com/mahlernim/gas-self-meter-ai/blob/main/PRIVACY.md"
+    const val SOURCE = "https://github.com/mahlernim/gas-self-meter-ai"
+    const val ISSUES = "https://github.com/mahlernim/gas-self-meter-ai/issues"
+}
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -107,6 +117,13 @@ class MainActivity : ComponentActivity() {
         if (!granted) vm.message = "알림 권한이 꺼져 있어요. 기기 설정에서 허용할 수 있어요."
     }
     fun open(url: String) = vm.attempt { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+    fun openUpdate() = vm.attempt {
+        try {
+            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(AppLinks.PLAY_STORE)).setPackage("com.android.vending"))
+        } catch (_: ActivityNotFoundException) {
+            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(AppLinks.TESTING_PAGE)))
+        }
+    }
 
     Scaffold(containerColor = Paper, snackbarHost = { SnackbarHost(snackbar) },
         bottomBar = { if (data.ready && !vm.storageError) NavigationBar(containerColor = Color.White) {
@@ -141,7 +158,7 @@ class MainActivity : ComponentActivity() {
                     { day, hour -> vm.setReminder(data.profile.reminder, day, hour) },
                     { loginProviderId = data.profile.providerId }, { vm.forgetCredentials() },
                     { export.launch("gas-self-meter-${today()}.json") }, { importer.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) },
-                    { confirmation = "meter" }, { confirmation = "erase" }, { licenses = true }, ::open, vm.busy)
+                    { confirmation = "meter" }, { confirmation = "erase" }, ::openUpdate, { licenses = true }, ::open, vm.busy)
             }
         }
     }
@@ -219,7 +236,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable private fun Page(content: @Composable ColumnScope.() -> Unit) {
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp).padding(top = 24.dp, bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(20.dp), content = content)
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(top = 20.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(16.dp), content = content)
 }
 @Composable private fun Title(title: String, subtitle: String? = null) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -228,12 +245,12 @@ class MainActivity : ComponentActivity() {
     }
 }
 @Composable private fun SurfaceCard(content: @Composable ColumnScope.() -> Unit) {
-    Card(shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = Color.White), modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp), content = content)
+    Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = Color.White), modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp), content = content)
     }
 }
 @Composable private fun ActionButton(text: String, icon: ImageVector, enabled: Boolean = true, onClick: () -> Unit) {
-    Button(onClick = onClick, enabled = enabled, modifier = Modifier.fillMaxWidth().heightIn(min = 54.dp), shape = RoundedCornerShape(16.dp)) {
+    Button(onClick = onClick, enabled = enabled, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp), shape = RoundedCornerShape(12.dp)) {
         Icon(icon, null, Modifier.size(20.dp)); Spacer(Modifier.width(10.dp)); Text(text, fontWeight = FontWeight.SemiBold)
     }
 }
@@ -477,53 +494,98 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable private fun SettingsPage(data: AppData, enable: () -> Unit, disable: () -> Unit, setTime: (Int, Int) -> Unit,
-    login: () -> Unit, forget: () -> Unit, export: () -> Unit, restore: () -> Unit, meter: () -> Unit, erase: () -> Unit, licenses: () -> Unit, open: (String) -> Unit, busy: Boolean) {
+    login: () -> Unit, forget: () -> Unit, export: () -> Unit, restore: () -> Unit, meter: () -> Unit, erase: () -> Unit, update: () -> Unit, licenses: () -> Unit, open: (String) -> Unit, busy: Boolean) {
+    val provider = Providers.get(data.profile.providerId)
     Page {
         Title("내 방식대로", "연결과 기록은 내가 관리해요.")
-        SurfaceCard {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) { Text("매주 계량기 실측 확인 알림", fontWeight = FontWeight.Bold); Text("계량기 숫자를 확인하고 입력할 시간을 알려드려요", color = Muted, style = MaterialTheme.typography.bodySmall) }
-                Switch(checked = data.profile.reminder, onCheckedChange = { if (it) enable() else disable() })
-            }
+        SettingsSection("알림") {
+            SettingToggle("매주 실측 확인 알림", "계량기 숫자를 확인할 시간을 알려드려요", Icons.Outlined.Notifications,
+                data.profile.reminder) { if (it) enable() else disable() }
             val days = listOf("월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일")
-            Choice("요일", days[data.profile.reminderDay - 1], days) { setTime(days.indexOf(it) + 1, data.profile.reminderHour) }
-            Choice("시간", "${data.profile.reminderHour}시", (0..23).map { "${it}시" }) { setTime(data.profile.reminderDay, it.removeSuffix("시").toInt()) }
-            Text("한국 시간 기준이에요. 배터리 절약이나 기기 상태에 따라 알림이 늦어질 수 있어요.", color = Muted, style = MaterialTheme.typography.bodySmall)
+            SettingChoice("요일", days[data.profile.reminderDay - 1], Icons.Outlined.CalendarToday, days) { setTime(days.indexOf(it) + 1, data.profile.reminderHour) }
+            SettingChoice("시간", "${data.profile.reminderHour}시", Icons.Outlined.Schedule, (0..23).map { "${it}시" }) { setTime(data.profile.reminderDay, it.removeSuffix("시").toInt()) }
+            Text("한국 시간 기준이며 기기 상태에 따라 알림이 늦어질 수 있어요.", modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp), color = Muted, style = MaterialTheme.typography.bodySmall)
         }
-        SurfaceCard {
-            Text("공급사 연결", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-            Text(Providers.get(data.profile.providerId).name)
-            Text(if (data.credentials == null) "저장된 로그인 정보 없음" else "로그인 정보가 이 기기에 암호화되어 있어요", color = Muted, style = MaterialTheme.typography.bodySmall)
-            if (Providers.get(data.profile.providerId).skens && data.profile.meter != "demo") ActionButton("${Providers.get(data.profile.providerId).name} 다시 연결", Icons.Outlined.Login, !busy, login)
-            TextButton(onClick = { open(Providers.get(data.profile.providerId).website) }) { Text("공급사 홈페이지 열기") }
-            if (data.credentials != null) TextButton(onClick = forget, enabled = !busy) { Text("로그인 정보만 삭제") }
+        SettingsSection("공급사") {
+            SettingInfo(provider.name, if (data.credentials == null) "저장된 로그인 정보 없음" else "로그인 정보가 이 기기에 암호화되어 있어요", Icons.Outlined.Apartment)
+            if (provider.skens && data.profile.meter != "demo") SettingAction("다시 연결", Icons.Outlined.Login, login, "${provider.name} 계정과 계약을 다시 확인해요", !busy)
+            SettingAction("공급사 홈페이지", Icons.Outlined.OpenInNew, { open(provider.website) }, provider.name)
+            if (data.credentials != null) SettingAction("로그인 정보 삭제", Icons.Outlined.NoAccounts, forget, "사용 기록은 그대로 유지해요", !busy)
         }
-        SurfaceCard {
-            Text("내 기록", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-            SettingAction("기록 내보내기", Icons.Outlined.FileUpload, export)
-            Text("백업에는 사용 이력과 확인 기록이 들어가요. 로그인 정보는 제외돼요. 내보낸 파일은 직접 안전하게 보관해 주세요.", color = Muted, style = MaterialTheme.typography.bodySmall)
-            SettingAction("백업 가져오기", Icons.Outlined.FileDownload, restore)
-            SettingAction("계량기를 교체했어요", Icons.Outlined.RestartAlt, meter)
-            SettingAction("모든 데이터 삭제 / 새로 시작", Icons.Outlined.DeleteOutline, erase)
+        SettingsSection("내 기록") {
+            SettingAction("기록 내보내기", Icons.Outlined.FileUpload, export, "로그인 정보를 제외한 백업 파일을 만들어요")
+            SettingAction("백업 가져오기", Icons.Outlined.FileDownload, restore, "현재 기록을 선택한 백업으로 바꿔요")
+            SettingAction("새 계량기로 시작", Icons.Outlined.RestartAlt, meter, "이전 실측은 보관해요")
+            SettingAction("모든 데이터 삭제", Icons.Outlined.DeleteOutline, erase, "로그인 정보와 기록을 모두 지워요", contentColor = MaterialTheme.colorScheme.error)
         }
-        SurfaceCard {
-            Text("추정은 이렇게 해요", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-            Text("작년 같은 달의 일평균 사용량과 앞뒤 달의 흐름을 연결해요. 최근 28일 안에 실제로 확인한 두 숫자가 있으면 사용 속도를 보정해요. 확인 후 시간이 지날수록 계절 흐름의 비중이 커져요.", color = Muted)
-            Text("작년 이력이 없으면 최근 실측 두 번으로 최대 14일 동안 추정해요. 난방 방식이나 거주 인원이 달라지면 차이가 커질 수 있어요. 정확도 범위를 보장하지 않아요.", color = Muted)
-            Text("‘AI’는 기기 안에서 계산하는 적응형 추정 모델을 뜻해요. 외부 AI에 계정이나 생활 데이터를 보내지 않아요.", color = Muted, style = MaterialTheme.typography.bodySmall)
+        SettingsSection("도움말과 앱 정보") {
+            SettingAction("업데이트 확인", Icons.Outlined.SystemUpdate, update, "Google Play에서 최신 버전을 확인해요")
+            SettingAction("테스터 그룹", Icons.Outlined.Groups, { open(AppLinks.TESTER_GROUP) }, "테스트 공지와 참여 계정을 관리해요")
+            SettingAction("개인정보 처리방침", Icons.Outlined.PrivacyTip, { open(AppLinks.PRIVACY) })
+            SettingAction("소스 코드", Icons.Outlined.Code, { open(AppLinks.SOURCE) }, "지원 범위와 개발 내용을 확인해요")
+            SettingAction("오류 신고", Icons.Outlined.BugReport, { open(AppLinks.ISSUES) })
+            SettingAction("오픈소스 라이선스", Icons.Outlined.Policy, licenses)
         }
         Hint(Icons.Outlined.PrivacyTip, "계정 로그인, 청구 조회와 선택한 검침값 입력만 공급사에 직접 전송해요. 계산은 기기 안에서 이루어지며 광고와 사용자 추적 기능은 없어요.")
-        TextButton(onClick = { open("https://github.com/mahlernim/gas-self-meter-ai") }) { Text("GitHub · 지원 범위와 개인정보 안내") }
-        TextButton(onClick = { open("https://groups.google.com/g/gas-self-meter-ai") }) { Text("테스터 그룹") }
-        TextButton(onClick = { open("https://github.com/mahlernim/gas-self-meter-ai/issues") }) { Text("오류 신고") }
-        TextButton(onClick = licenses) { Text("오픈소스 라이선스") }
+        Text("추정은 작년 계절 흐름과 최근 실측을 함께 사용해요. 외부 AI에 계정이나 생활 데이터를 보내지 않으며 정확도 범위를 보장하지 않아요.", color = Muted, style = MaterialTheme.typography.bodySmall)
         Text("똑똑 자가검침 AI  ${BuildConfig.VERSION_NAME}\n독립적으로 만든 비공식 앱이에요.", color = Muted, style = MaterialTheme.typography.bodySmall)
     }
 }
 
-@Composable private fun SettingAction(text: String, icon: ImageVector, action: () -> Unit) {
-    TextButton(onClick = action, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), contentPadding = PaddingValues(0.dp)) {
-        Icon(icon, null, Modifier.size(22.dp)); Spacer(Modifier.width(12.dp)); Text(text, Modifier.weight(1f)); Icon(Icons.Outlined.ChevronRight, null)
+@Composable private fun SettingsSection(title: String, content: @Composable ColumnScope.() -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(title, modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp), color = Teal, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        Column(content = content)
+    }
+}
+@Composable private fun SettingInfo(text: String, supportingText: String, icon: ImageVector) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, null, Modifier.size(22.dp), tint = Muted)
+        Spacer(Modifier.width(16.dp))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(text, fontWeight = FontWeight.SemiBold)
+            Text(supportingText, color = Muted, style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+@Composable private fun SettingToggle(text: String, supportingText: String, icon: ImageVector, checked: Boolean, change: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, null, Modifier.size(22.dp), tint = Muted)
+        Spacer(Modifier.width(16.dp))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(text, fontWeight = FontWeight.SemiBold)
+            Text(supportingText, color = Muted, style = MaterialTheme.typography.bodySmall)
+        }
+        Switch(checked = checked, onCheckedChange = change)
+    }
+}
+@Composable private fun SettingChoice(label: String, value: String, icon: ImageVector, values: List<String>, change: (String) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        TextButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)) {
+            Icon(icon, null, Modifier.size(22.dp), tint = Muted)
+            Spacer(Modifier.width(16.dp))
+            Text(label, Modifier.weight(1f), color = Ink)
+            Text(value, color = Teal, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.width(8.dp))
+            Icon(Icons.Outlined.ExpandMore, null, Modifier.size(20.dp))
+        }
+        DropdownMenu(expanded, onDismissRequest = { expanded = false }, modifier = Modifier.heightIn(max = 350.dp)) {
+            values.forEach { item -> DropdownMenuItem(text = { Text(item) }, onClick = { change(item); expanded = false }) }
+        }
+    }
+}
+@Composable private fun SettingAction(text: String, icon: ImageVector, action: () -> Unit, supportingText: String? = null,
+    enabled: Boolean = true, contentColor: Color = MaterialTheme.colorScheme.primary) {
+    TextButton(onClick = action, enabled = enabled, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+        colors = ButtonDefaults.textButtonColors(contentColor = contentColor)) {
+        Icon(icon, null, Modifier.size(22.dp)); Spacer(Modifier.width(16.dp))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(text, color = if (enabled) contentColor else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f))
+            if (supportingText != null) Text(supportingText, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+        }
+        Icon(Icons.Outlined.ChevronRight, null, Modifier.size(20.dp))
     }
 }
 @Composable private fun EmptyNote(title: String, text: String) {
