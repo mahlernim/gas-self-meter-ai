@@ -35,10 +35,16 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
     fun manual(provider: String) = attempt {
         save(data.copy(profile = data.profile.copy(providerId = provider), ready = true))
     }
-    fun calibrate(reading: String) = attempt {
-        check(!busy) { "조회가 끝난 뒤 다시 시도해 주세요." }
-        save(Estimator.addObservation(data, number(reading)))
-        message = "실제 확인값을 저장했어요. 다음 추정에 반영할게요."
+    fun calibrate(reading: String): Boolean {
+        return try {
+            check(!busy) { "조회가 끝난 뒤 다시 시도해 주세요." }
+            save(Estimator.addObservation(data, number(reading)))
+            message = "실제 확인값을 저장했어요. 화면과 다음 추정에 반영했어요."
+            true
+        } catch (e: Exception) {
+            message = readableError(e)
+            false
+        }
     }
     fun addPeriod(start: String, end: String, usage: String) = attempt {
         check(!busy) { "조회가 끝난 뒤 다시 시도해 주세요." }
