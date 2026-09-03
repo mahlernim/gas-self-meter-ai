@@ -1,0 +1,870 @@
+{
+  "checked_at_utc": "2026-09-03T10:16:57.001880+00:00",
+  "scope": "Public GET requests only. Matching login source is not proof of shared authenticated billing APIs.",
+  "providers": [
+    {
+      "slug": "busan",
+      "name": "부산도시가스",
+      "pages": [
+        {
+          "url": "https://www.skens.com/busan/login/login.do",
+          "status": 200,
+          "final_url": "https://www.skens.com/busan/login/login.do",
+          "title": "로그인 < 내정보 < ㈜부산도시가스  | SK이노베이션 E&S",
+          "credential_fields": [
+            "id",
+            "pw",
+            "returnURL"
+          ],
+          "login_endpoint": "loginProcess.do",
+          "success_code_S": true,
+          "login_function_sha256": "9ecdbe6dcf4c683d03208a626c3ae3221e1132232dfa20d222fdedef89745604",
+          "shared_scripts": [
+            "/js/common.js",
+            "/js/ebpp_common.js"
+          ],
+          "recovery_links": [
+            {
+              "label": "회원가입",
+              "href": "../join/type.do",
+              "onclick": null
+            },
+            {
+              "label": "아이디 /비밀번호 찾기",
+              "href": "../login/find.do",
+              "onclick": null
+            },
+            {
+              "label": "회원가입",
+              "href": "#",
+              "onclick": "goMenuPage(\"/busan/join/type.do\");"
+            },
+            {
+              "label": "아이디/비밀번호찾기",
+              "href": "#",
+              "onclick": "goMenuPage(\"/busan/login/find.do\");"
+            },
+            {
+              "label": "아이디 /비밀번호 찾기",
+              "href": "/busan/login/find.do",
+              "onclick": null
+            },
+            {
+              "label": "회원가입",
+              "href": "../join/type.do",
+              "onclick": null
+            }
+          ],
+          "credentialed_flow_verified": false
+        },
+        {
+          "url": "https://ebpp.skens.com/busan/login/login.do",
+          "status": 200,
+          "final_url": "https://ebpp.skens.com/busan/login/login.do",
+          "title": "로그인 < 내정보 < ㈜부산도시가스  | SK이노베이션 E&S",
+          "credential_fields": [
+            "id",
+            "pw",
+            "returnURL"
+          ],
+          "login_endpoint": "loginProcess.do",
+          "success_code_S": true,
+          "login_function_sha256": "9ecdbe6dcf4c683d03208a626c3ae3221e1132232dfa20d222fdedef89745604",
+          "shared_scripts": [
+            "/js/common.js",
+            "/js/ebpp_common.js"
+          ],
+          "recovery_links": [
+            {
+              "label": "회원가입",
+              "href": "../join/type.do",
+              "onclick": null
+            },
+            {
+              "label": "아이디 /비밀번호 찾기",
+              "href": "../login/find.do",
+              "onclick": null
+            },
+            {
+              "label": "회원가입",
+              "href": "#",
+              "onclick": "goMenuPage(\"/busan/join/type.do\");"
+            },
+            {
+              "label": "아이디/비밀번호찾기",
+              "href": "#",
+              "onclick": "goMenuPage(\"/busan/login/find.do\");"
+            },
+            {
+              "label": "아이디 /비밀번호 찾기",
+              "href": "/busan/login/find.do",
+              "onclick": null
+            },
+            {
+              "label": "회원가입",
+              "href": "../join/type.do",
+              "onclick": null
+            }
+          ],
+          "credentialed_flow_verified": false
+        }
+      ]
+    },
+    {
+      "slug": "koone",
+      "name": "코원에너지서비스",
+      "pages": [
+        {
+          "url": "https://www.skens.com/koone/login/login.do",
+          "status": 200,
+          "final_url": "https://www.skens.com/koone/login/login.do",
+          "title": "로그인 < 내정보 < 코원에너지서비스㈜  | SK이노베이션 E&S",
+          "credential_fields": [
+            "id",
+            "pw",
+            "returnURL"
+          ],
+          "login_endpoint": "loginProcess.do",
+          "success_code_S": true,
+          "login_function_sha256": "9ecdbe6dcf4c683d03208a626c3ae3221e1132232dfa20d222fdedef89745604",
+          "shared_scripts": [
+            "/js/common.js",
+            "/js/ebpp_common.js"
+          ],
+          "recovery_links": [
+            {
+              "label": "회원가입",
+              "href": "../join/type.do",
+              "onclick": null
+            },
+            {
+              "label": "아이디 /비밀번호 찾기",
+              "href": "../login/find.do",
+              "onclick": null
+            },
+            {
+              "label": "회원가입",
+              "href": "#",
+              "onclick": "goMenuPage(\"/koone/join/type.do\");"
+            },
+            {
+              "label": "아이디/비밀번호찾기",
+              "href": "#",
+              "onclick": "goMenuPage(\"/koone/login/find.do\");"
+            },
+            {
+              "label": "아이디 /비밀번호 찾기",
+              "href": "/koone/login/find.do",
+              "onclick": null
+            },
+            {
+              "label": "회원가입",
+              "href": "../join/type.do",
+              "onclick": null
+            }
+          ],
+          "credentialed_flow_verified": false
+        },
+        {
+          "url": "https://ebpp.skens.com/koone/login/login.do",
+          "status": 200,
+          "final_url": "https://ebpp.skens.com/koone/login/login.do",
+          "title": "로그인 < 내정보 < 코원에너지서비스㈜  | SK이노베이션 E&S",
+          "credential_fields": [
+            "id",
+            "pw",
+            "returnURL"
+          ],
+          "login_endpoint": "loginProcess.do",
+          "success_code_S": true,
+          "login_function_sha256": "9ecdbe6dcf4c683d03208a626c3ae3221e1132232dfa20d222fdedef89745604",
+          "shared_scripts": [
+            "/js/common.js",
+            "/js/ebpp_common.js"
+          ],
+          "recovery_links": [
+            {
+              "label": "회원가입",
+              "href": "../join/type.do",
+              "onclick": null
+            },
+            {
+              "label": "아이디 /비밀번호 찾기",
+              "href": "../login/find.do",
+              "onclick": null
+            },
+            {
+              "label": "회원가입",
+              "href": "#",
+              "onclick": "goMenuPage(\"/koone/join/type.do\");"
+            },
+            {
+              "label": "아이디/비밀번호찾기",
+              "href": "#",
+              "onclick": "goMenuPage(\"/koone/login/find.do\");"
+            },
+            {
+              "label": "아이디 /비밀번호 찾기",
+              "href": "/koone/login/find.do",
+              "onclick": null
+            },
+            {
+              "label": "회원가입",
+              "href": "../join/type.do",
+              "onclick": null
+            }
+          ],
+          "credentialed_flow_verified": false
+        }
+      ]
+    },
+    {
+      "slug": "cheongju",
+      "name": "충청에너지서비스",
+      "pages": [
+        {
+          "url": "https://www.skens.com/cheongju/login/login.do",
+          "status": 200,
+          "final_url": "https://www.skens.com/cheongju/login/login.do",
+          "title": "로그인 < 내정보 < 충청에너지서비스㈜  | SK이노베이션 E&S",
+          "credential_fields": [
+            "id",
+            "pw",
+            "returnURL"
+          ],
+          "login_endpoint": "loginProcess.do",
+          "success_code_S": true,
+          "login_function_sha256": "9ecdbe6dcf4c683d03208a626c3ae3221e1132232dfa20d222fdedef89745604",
+          "shared_scripts": [
+            "/js/common.js",
+            "/js/ebpp_common.js"
+          ],
+          "recovery_links": [
+            {
+              "label": "회원가입",
+              "href": "../join/type.do",
+              "onclick": null
+            },
+            {
+              "label": "아이디 /비밀번호 찾기",
+              "href": "../login/find.do",
+              "onclick": null
+            },
+            {
+              "label": "회원가입",
+              "href": "#",
+              "onclick": "goMenuPage(\"/cheongju/join/type.do\");"
+            },
+            {
+              "label": "아이디/비밀번호찾기",
+              "href": "#",
+              "onclick": "goMenuPage(\"/cheongju/login/find.do\");"
+            },
+            {
+              "label": "아이디 /비밀번호 찾기",
+              "href": "/cheongju/login/find.do",
+              "onclick": null
+            },
+            {
+              "label": "회원가입",
+              "href": "../join/type.do",
+              "onclick": null
+            }
+          ],
+          "credentialed_flow_verified": false
+        },
+        {
+          "url": "https://ebpp.skens.com/cheongju/login/login.do",
+          "status": 200,
+          "final_url": "https://ebpp.skens.com/cheongju/login/login.do",
+          "title": "로그인 < 내정보 < 충청에너지서비스㈜  | SK이노베이션 E&S",
+          "credential_fields": [
+            "id",
+            "pw",
+            "returnURL"
+          ],
+          "login_endpoint": "loginProcess.do",
+          "success_code_S": true,
+          "login_function_sha256": "9ecdbe6dcf4c683d03208a626c3ae3221e1132232dfa20d222fdedef89745604",
+          "shared_scripts": [
+            "/js/common.js",
+            "/js/ebpp_common.js"
+          ],
+          "recovery_links": [
+            {
+              "label": "회원가입",
+              "href": "../join/type.do",
+              "onclick": null
+            },
+            {
+              "label": "아이디 /비밀번호 찾기",
+              "href": "../login/find.do",
+              "onclick": null
+            },
+            {
+              "label": "회원가입",
+              "href": "#",
+              "onclick": "goMenuPage(\"/cheongju/join/type.do\");"
+            },
+            {
+              "label": "아이디/비밀번호찾기",
+              "href": "#",
+              "onclick": "goMenuPage(\"/cheongju/login/find.do\");"
+            },
+            {
+              "label": "아이디 /비밀번호 찾기",
+              "href": "/cheongju/login/find.do",
+              "onclick": null
+            },
+            {
+              "label": "회원가입",
+              "href": "../join/type.do",
+              "onclick": null
+            }
+          ],
+          "credentialed_flow_verified": false
+        }
+      ]
+    },
+    {
+      "slug": "gumi",
+      "name": "영남에너지서비스 구미",
+      "pages": [
+        {
+          "url": "https://www.skens.com/gumi/login/login.do",
+          "status": 200,
+          "final_url": "https://www.skens.com/gumi/login/login.do",
+          "title": "로그인 < 내정보 < 영남에너지서비스㈜ - 구미 | SK이노베이션 E&S",
+          "credential_fields": [
+            "id",
+            "pw",
+            "returnURL"
+          ],
+          "login_endpoint": "loginProcess.do",
+          "success_code_S": true,
+          "login_function_sha256": "9ecdbe6dcf4c683d03208a626c3ae3221e1132232dfa20d222fdedef89745604",
+          "shared_scripts": [
+            "/js/common.js",
+            "/js/ebpp_common.js"
+          ],
+          "recovery_links": [
+            {
+              "label": "회원가입",
+              "href": "../join/type.do",
+              "onclick": null
+            },
+            {
+              "label": "아이디 /비밀번호 찾기",
+              "href": "../login/find.do",
+              "onclick": null
+            },
+            {
+              "label": "회원가입",
+              "href": "#",
+              "onclick": "goMenuPage(\"/gumi/join/type.do\");"
+            },
+            {
+              "label": "아이디/비밀번호찾기",
+              "href": "#",
+              "onclick": "goMenuPage(\"/gumi/login/find.do\");"
+            },
+            {
+              "label": "아이디 /비밀번호 찾기",
+              "href": "/gumi/login/find.do",
+              "onclick": null
+            },
+            {
+              "label": "회원가입",
+              "href": "../join/type.do",
+              "onclick": null
+            }
+          ],
+          "credentialed_flow_verified": false
+        },
+        {
+          "url": "https://ebpp.skens.com/gumi/login/login.do",
+          "status": 200,
+          "final_url": "https://ebpp.skens.com/gumi/login/login.do",
+          "title": "로그인 < 내정보 < 영남에너지서비스㈜ - 구미 | SK이노베이션 E&S",
+          "credential_fields": [
+            "id",
+            "pw",
+            "returnURL"
+          ],
+          "login_endpoint": "loginProcess.do",
+          "success_code_S": true,
+          "login_function_sha256": "9ecdbe6dcf4c683d03208a626c3ae3221e1132232dfa20d222fdedef89745604",
+          "shared_scripts": [
+            "/js/common.js",
+            "/js/ebpp_common.js"
+          ],
+          "recovery_links": [
+            {
+              "label": "회원가입",
+              "href": "../join/type.do",
+              "onclick": null
+            },
+            {
+              "label": "아이디 /비밀번호 찾기",
+              "href": "../login/find.do",
+              "onclick": null
+            },
+            {
+              "label": "회원가입",
+              "href": "#",
+              "onclick": "goMenuPage(\"/gumi/join/type.do\");"
+            },
+            {
+              "label": "아이디/비밀번호찾기",
+              "href": "#",
+              "onclick": "goMenuPage(\"/gumi/login/find.do\");"
+            },
+            {
+              "label": "아이디 /비밀번호 찾기",
+              "href": "/gumi/login/find.do",
+              "onclick": null
+            },
+            {
+              "label": "회원가입",
+              "href": "../join/type.do",
+              "onclick": null
+            }
+          ],
+          "credentialed_flow_verified": false
+        }
+      ]
+    },
+    {
+      "slug": "pohang",
+      "name": "영남에너지서비스 포항",
+      "pages": [
+        {
+          "url": "https://www.skens.com/pohang/login/login.do",
+          "status": 200,
+          "final_url": "https://www.skens.com/pohang/login/login.do",
+          "title": "로그인 < 내정보 < 영남에너지서비스㈜ - 포항 | SK이노베이션 E&S",
+          "credential_fields": [
+            "id",
+            "pw",
+            "returnURL"
+          ],
+          "login_endpoint": "loginProcess.do",
+          "success_code_S": true,
+          "login_function_sha256": "9ecdbe6dcf4c683d03208a626c3ae3221e1132232dfa20d222fdedef89745604",
+          "shared_scripts": [
+            "/js/common.js",
+            "/js/ebpp_common.js"
+          ],
+          "recovery_links": [
+            {
+              "label": "회원가입",
+              "href": "../join/type.do",
+              "onclick": null
+            },
+            {
+              "label": "아이디 /비밀번호 찾기",
+              "href": "../login/find.do",
+              "onclick": null
+            },
+            {
+              "label": "회원가입",
+              "href": "#",
+              "onclick": "goMenuPage(\"/pohang/join/type.do\");"
+            },
+            {
+              "label": "아이디/비밀번호찾기",
+              "href": "#",
+              "onclick": "goMenuPage(\"/pohang/login/find.do\");"
+            },
+            {
+              "label": "아이디 /비밀번호 찾기",
+              "href": "/pohang/login/find.do",
+              "onclick": null
+            },
+            {
+              "label": "회원가입",
+              "href": "../join/type.do",
+              "onclick": null
+            }
+          ],
+          "credentialed_flow_verified": false
+        },
+        {
+          "url": "https://ebpp.skens.com/pohang/login/login.do",
+          "status": 200,
+          "final_url": "https://ebpp.skens.com/pohang/login/login.do",
+          "title": "로그인 < 내정보 < 영남에너지서비스㈜ - 포항 | SK이노베이션 E&S",
+          "credential_fields": [
+            "id",
+            "pw",
+            "returnURL"
+          ],
+          "login_endpoint": "loginProcess.do",
+          "success_code_S": true,
+          "login_function_sha256": "9ecdbe6dcf4c683d03208a626c3ae3221e1132232dfa20d222fdedef89745604",
+          "shared_scripts": [
+            "/js/common.js",
+            "/js/ebpp_common.js"
+          ],
+          "recovery_links": [
+            {
+              "label": "회원가입",
+              "href": "../join/type.do",
+              "onclick": null
+            },
+            {
+              "label": "아이디 /비밀번호 찾기",
+              "href": "../login/find.do",
+              "onclick": null
+            },
+            {
+              "label": "회원가입",
+              "href": "#",
+              "onclick": "goMenuPage(\"/pohang/join/type.do\");"
+            },
+            {
+              "label": "아이디/비밀번호찾기",
+              "href": "#",
+              "onclick": "goMenuPage(\"/pohang/login/find.do\");"
+            },
+            {
+              "label": "아이디 /비밀번호 찾기",
+              "href": "/pohang/login/find.do",
+              "onclick": null
+            },
+            {
+              "label": "회원가입",
+              "href": "../join/type.do",
+              "onclick": null
+            }
+          ],
+          "credentialed_flow_verified": false
+        }
+      ]
+    },
+    {
+      "slug": "jeonnam",
+      "name": "전남도시가스",
+      "pages": [
+        {
+          "url": "https://www.skens.com/jeonnam/login/login.do",
+          "status": 200,
+          "final_url": "https://www.skens.com/jeonnam/login/login.do",
+          "title": "로그인 < 내정보 < 전남도시가스주식회사  | SK이노베이션 E&S",
+          "credential_fields": [
+            "id",
+            "pw",
+            "returnURL"
+          ],
+          "login_endpoint": "loginProcess.do",
+          "success_code_S": true,
+          "login_function_sha256": "9ecdbe6dcf4c683d03208a626c3ae3221e1132232dfa20d222fdedef89745604",
+          "shared_scripts": [
+            "/js/common.js",
+            "/js/ebpp_common.js"
+          ],
+          "recovery_links": [
+            {
+              "label": "회원가입",
+              "href": "../join/type.do",
+              "onclick": null
+            },
+            {
+              "label": "아이디 /비밀번호 찾기",
+              "href": "../login/find.do",
+              "onclick": null
+            },
+            {
+              "label": "회원가입",
+              "href": "#",
+              "onclick": "goMenuPage(\"/jeonnam/join/type.do\");"
+            },
+            {
+              "label": "아이디/비밀번호찾기",
+              "href": "#",
+              "onclick": "goMenuPage(\"/jeonnam/login/find.do\");"
+            },
+            {
+              "label": "아이디 /비밀번호 찾기",
+              "href": "/jeonnam/login/find.do",
+              "onclick": null
+            },
+            {
+              "label": "회원가입",
+              "href": "../join/type.do",
+              "onclick": null
+            }
+          ],
+          "credentialed_flow_verified": false
+        },
+        {
+          "url": "https://ebpp.skens.com/jeonnam/login/login.do",
+          "status": 200,
+          "final_url": "https://ebpp.skens.com/jeonnam/login/login.do",
+          "title": "로그인 < 내정보 < 전남도시가스주식회사  | SK이노베이션 E&S",
+          "credential_fields": [
+            "id",
+            "pw",
+            "returnURL"
+          ],
+          "login_endpoint": "loginProcess.do",
+          "success_code_S": true,
+          "login_function_sha256": "9ecdbe6dcf4c683d03208a626c3ae3221e1132232dfa20d222fdedef89745604",
+          "shared_scripts": [
+            "/js/common.js",
+            "/js/ebpp_common.js"
+          ],
+          "recovery_links": [
+            {
+              "label": "회원가입",
+              "href": "../join/type.do",
+              "onclick": null
+            },
+            {
+              "label": "아이디 /비밀번호 찾기",
+              "href": "../login/find.do",
+              "onclick": null
+            },
+            {
+              "label": "회원가입",
+              "href": "#",
+              "onclick": "goMenuPage(\"/jeonnam/join/type.do\");"
+            },
+            {
+              "label": "아이디/비밀번호찾기",
+              "href": "#",
+              "onclick": "goMenuPage(\"/jeonnam/login/find.do\");"
+            },
+            {
+              "label": "아이디 /비밀번호 찾기",
+              "href": "/jeonnam/login/find.do",
+              "onclick": null
+            },
+            {
+              "label": "회원가입",
+              "href": "../join/type.do",
+              "onclick": null
+            }
+          ],
+          "credentialed_flow_verified": false
+        }
+      ]
+    },
+    {
+      "slug": "gangwon",
+      "name": "강원도시가스",
+      "pages": [
+        {
+          "url": "https://www.skens.com/gangwon/login/login.do",
+          "status": 200,
+          "final_url": "https://www.skens.com/gangwon/login/login.do",
+          "title": "로그인 < 내정보 < 강원도시가스㈜  | SK이노베이션 E&S",
+          "credential_fields": [
+            "id",
+            "pw",
+            "returnURL"
+          ],
+          "login_endpoint": "loginProcess.do",
+          "success_code_S": true,
+          "login_function_sha256": "9ecdbe6dcf4c683d03208a626c3ae3221e1132232dfa20d222fdedef89745604",
+          "shared_scripts": [
+            "/js/common.js",
+            "/js/ebpp_common.js"
+          ],
+          "recovery_links": [
+            {
+              "label": "회원가입",
+              "href": "../join/type.do",
+              "onclick": null
+            },
+            {
+              "label": "아이디 /비밀번호 찾기",
+              "href": "../login/find.do",
+              "onclick": null
+            },
+            {
+              "label": "회원가입",
+              "href": "#",
+              "onclick": "goMenuPage(\"/gangwon/join/type.do\");"
+            },
+            {
+              "label": "아이디/비밀번호찾기",
+              "href": "#",
+              "onclick": "goMenuPage(\"/gangwon/login/find.do\");"
+            },
+            {
+              "label": "아이디 /비밀번호 찾기",
+              "href": "/gangwon/login/find.do",
+              "onclick": null
+            },
+            {
+              "label": "회원가입",
+              "href": "../join/type.do",
+              "onclick": null
+            }
+          ],
+          "credentialed_flow_verified": false
+        },
+        {
+          "url": "https://ebpp.skens.com/gangwon/login/login.do",
+          "status": 200,
+          "final_url": "https://ebpp.skens.com/gangwon/login/login.do",
+          "title": "로그인 < 내정보 < 강원도시가스㈜  | SK이노베이션 E&S",
+          "credential_fields": [
+            "id",
+            "pw",
+            "returnURL"
+          ],
+          "login_endpoint": "loginProcess.do",
+          "success_code_S": true,
+          "login_function_sha256": "9ecdbe6dcf4c683d03208a626c3ae3221e1132232dfa20d222fdedef89745604",
+          "shared_scripts": [
+            "/js/common.js",
+            "/js/ebpp_common.js"
+          ],
+          "recovery_links": [
+            {
+              "label": "회원가입",
+              "href": "../join/type.do",
+              "onclick": null
+            },
+            {
+              "label": "아이디 /비밀번호 찾기",
+              "href": "../login/find.do",
+              "onclick": null
+            },
+            {
+              "label": "회원가입",
+              "href": "#",
+              "onclick": "goMenuPage(\"/gangwon/join/type.do\");"
+            },
+            {
+              "label": "아이디/비밀번호찾기",
+              "href": "#",
+              "onclick": "goMenuPage(\"/gangwon/login/find.do\");"
+            },
+            {
+              "label": "아이디 /비밀번호 찾기",
+              "href": "/gangwon/login/find.do",
+              "onclick": null
+            },
+            {
+              "label": "회원가입",
+              "href": "../join/type.do",
+              "onclick": null
+            }
+          ],
+          "credentialed_flow_verified": false
+        }
+      ]
+    },
+    {
+      "slug": "jeonbuk",
+      "name": "전북에너지서비스",
+      "pages": [
+        {
+          "url": "https://www.skens.com/jeonbuk/login/login.do",
+          "status": 200,
+          "final_url": "https://www.skens.com/jeonbuk/login/login.do",
+          "title": "로그인 < 내정보 < 전북에너지서비스주식회사  | SK이노베이션 E&S",
+          "credential_fields": [
+            "id",
+            "pw",
+            "returnURL"
+          ],
+          "login_endpoint": "loginProcess.do",
+          "success_code_S": true,
+          "login_function_sha256": "9ecdbe6dcf4c683d03208a626c3ae3221e1132232dfa20d222fdedef89745604",
+          "shared_scripts": [
+            "/js/common.js",
+            "/js/ebpp_common.js"
+          ],
+          "recovery_links": [
+            {
+              "label": "회원가입",
+              "href": "../join/type.do",
+              "onclick": null
+            },
+            {
+              "label": "아이디 /비밀번호 찾기",
+              "href": "../login/find.do",
+              "onclick": null
+            },
+            {
+              "label": "회원가입",
+              "href": "#",
+              "onclick": "goMenuPage(\"/jeonbuk/join/type.do\");"
+            },
+            {
+              "label": "아이디/비밀번호찾기",
+              "href": "#",
+              "onclick": "goMenuPage(\"/jeonbuk/login/find.do\");"
+            },
+            {
+              "label": "아이디 /비밀번호 찾기",
+              "href": "/jeonbuk/login/find.do",
+              "onclick": null
+            },
+            {
+              "label": "회원가입",
+              "href": "../join/type.do",
+              "onclick": null
+            }
+          ],
+          "credentialed_flow_verified": false
+        },
+        {
+          "url": "https://ebpp.skens.com/jeonbuk/login/login.do",
+          "status": 200,
+          "final_url": "https://ebpp.skens.com/jeonbuk/login/login.do",
+          "title": "로그인 < 내정보 < 전북에너지서비스주식회사  | SK이노베이션 E&S",
+          "credential_fields": [
+            "id",
+            "pw",
+            "returnURL"
+          ],
+          "login_endpoint": "loginProcess.do",
+          "success_code_S": true,
+          "login_function_sha256": "9ecdbe6dcf4c683d03208a626c3ae3221e1132232dfa20d222fdedef89745604",
+          "shared_scripts": [
+            "/js/common.js",
+            "/js/ebpp_common.js"
+          ],
+          "recovery_links": [
+            {
+              "label": "회원가입",
+              "href": "../join/type.do",
+              "onclick": null
+            },
+            {
+              "label": "아이디 /비밀번호 찾기",
+              "href": "../login/find.do",
+              "onclick": null
+            },
+            {
+              "label": "회원가입",
+              "href": "#",
+              "onclick": "goMenuPage(\"/jeonbuk/join/type.do\");"
+            },
+            {
+              "label": "아이디/비밀번호찾기",
+              "href": "#",
+              "onclick": "goMenuPage(\"/jeonbuk/login/find.do\");"
+            },
+            {
+              "label": "아이디 /비밀번호 찾기",
+              "href": "/jeonbuk/login/find.do",
+              "onclick": null
+            },
+            {
+              "label": "회원가입",
+              "href": "../join/type.do",
+              "onclick": null
+            }
+          ],
+          "credentialed_flow_verified": false
+        }
+      ]
+    }
+  ]
+}

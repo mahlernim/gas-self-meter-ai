@@ -1,0 +1,117 @@
+[
+  {
+    "url": "https://www.skens.com/busan/login/login.do",
+    "status": 200,
+    "final": "https://www.skens.com/busan/login/login.do"
+  },
+  {
+    "url": "https://www.seoulgas.co.kr/",
+    "status": 200,
+    "final": "https://www.seoulgas.co.kr/"
+  },
+  {
+    "url": "https://www.lsyesco.com/",
+    "status": 200,
+    "final": "https://www.lsyesco.com/"
+  },
+  {
+    "url": "https://www.samchully.co.kr/",
+    "status": 200,
+    "final": "https://www.samchully.co.kr/en/"
+  },
+  {
+    "url": "https://icgas.co.kr:8443/",
+    "status": 200,
+    "final": "https://icgas.co.kr:8443/"
+  },
+  {
+    "url": "https://www.daeryunens.com/",
+    "status": 200,
+    "final": "https://www.daeryunens.com/"
+  },
+  {
+    "url": "https://www.kituramienergy.co.kr/",
+    "status": 200,
+    "final": "https://www.kituramienergy.co.kr/"
+  },
+  {
+    "url": "https://www.skens.com/koone/login/login.do",
+    "status": 200,
+    "final": "https://www.skens.com/koone/login/login.do"
+  },
+  {
+    "url": "https://www.skens.com/cheongju/login/login.do",
+    "status": 200,
+    "final": "https://www.skens.com/cheongju/login/login.do"
+  },
+  {
+    "url": "https://www.skens.com/gumi/login/login.do",
+    "status": 200,
+    "final": "https://www.skens.com/gumi/login/login.do"
+  },
+  {
+    "url": "https://www.skens.com/pohang/login/login.do",
+    "status": 200,
+    "final": "https://www.skens.com/pohang/login/login.do"
+  },
+  {
+    "url": "https://www.skens.com/jeonnam/login/login.do",
+    "status": 200,
+    "final": "https://www.skens.com/jeonnam/login/login.do"
+  },
+  {
+    "url": "https://www.skens.com/gangwon/login/login.do",
+    "status": 200,
+    "final": "https://www.skens.com/gangwon/login/login.do"
+  },
+  {
+    "url": "https://www.skens.com/jeonbuk/login/login.do",
+    "status": 200,
+    "final": "https://www.skens.com/jeonbuk/login/login.do"
+  },
+  {
+    "url": "https://www.jbcorporation.com/",
+    "status": 200,
+    "final": "https://www.jbcorporation.com/"
+  },
+  {
+    "url": "https://www.jbcitygas.co.kr/",
+    "status": 200,
+    "final": "https://www.jbcitygas.co.kr/"
+  },
+  {
+    "url": "https://www.kscg.co.kr/",
+    "status": 200,
+    "final": "https://www.kscg.co.kr/"
+  },
+  {
+    "url": "https://www.jejucitygas.com/",
+    "status": 200,
+    "final": "https://www.jejucitygas.com/"
+  },
+  {
+    "url": "https://www.kdgas.co.kr/",
+    "status": 200,
+    "final": "https://www.kdgas.co.kr/kdgas/main.do"
+  },
+  {
+    "url": "https://www.cncityenergy.com/",
+    "status": 200,
+    "final": "https://www.cncityenergy.com/jsp/index.jsp"
+  },
+  {
+    "url": "https://www.daesungenergy.com/",
+    "status": 200,
+    "final": "https://www.daesungenergy.com/"
+  },
+  {
+    "url": "https://www.hyenergy.co.kr/",
+    "status": 200,
+    "final": "https://www.hyenergy.co.kr/main/main.asp"
+  },
+  {
+    "url": "https://www.kogas.or.kr/site/koGas/1020408040000",
+    "status": 200,
+    "final": "https://www.kogas.or.kr/site/koGas/1020408040000"
+  }
+]

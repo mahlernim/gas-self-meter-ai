@@ -1,0 +1,44 @@
+param([string]$SigningDirectory = (Join-Path $env:LOCALAPPDATA 'GasSelfMeterAI/signing'))
+$ErrorActionPreference = 'Stop'
+if (-not $env:JAVA_HOME) { throw 'Set JAVA_HOME to a JDK 21 installation first.' }
+$projectRoot = Split-Path $PSScriptRoot -Parent
+$storePath = Join-Path $SigningDirectory 'release.jks'
+$passwordPath = Join-Path $SigningDirectory 'password.dpapi'
+New-Item -ItemType Directory -Force -Path $SigningDirectory | Out-Null
+if ((Test-Path -LiteralPath $storePath) -xor (Test-Path -LiteralPath $passwordPath)) {
+    throw 'Signing files are incomplete. Restore the matching signing files. Existing keys are never overwritten.'
+}
+if (-not (Test-Path -LiteralPath $storePath)) {
+    $randomBytes = New-Object byte[] 32
+    [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($randomBytes)
+    $env:GAS_SIGNING_PASSWORD = [Convert]::ToBase64String($randomBytes)
+    try {
+        & (Join-Path $env:JAVA_HOME 'bin/keytool.exe') -genkeypair -keystore $storePath -storetype JKS -alias gas-self-meter-ai -keyalg RSA -keysize 4096 -validity 10000 -dname 'CN=Gas Self Meter AI, O=mahlernim, C=KR' -storepass:env GAS_SIGNING_PASSWORD -keypass:env GAS_SIGNING_PASSWORD
+        if ($LASTEXITCODE -ne 0) { throw 'Key generation failed.' }
+        $encrypted = ConvertFrom-SecureString (ConvertTo-SecureString $env:GAS_SIGNING_PASSWORD -AsPlainText -Force)
+        [System.IO.File]::WriteAllText($passwordPath, $encrypted)
+    } finally { $env:GAS_SIGNING_PASSWORD = $null }
+}
+$protectedPassword = ConvertTo-SecureString ([System.IO.File]::ReadAllText($passwordPath))
+$credential = New-Object System.Net.NetworkCredential('', $protectedPassword)
+$env:GAS_SIGNING_STORE = $storePath
+$env:GAS_SIGNING_PASSWORD = $credential.Password
+try {
+    Push-Location $projectRoot
+    & ./gradlew.bat :app:assembleRelease --console=plain
+    if ($LASTEXITCODE -ne 0) { throw 'Release build failed.' }
+    $artifactDir = Join-Path $projectRoot 'artifacts'
+    New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
+    $apkName = 'gas-self-meter-ai-0.1.0.apk'
+    $apk = Join-Path $artifactDir $apkName
+    Copy-Item -LiteralPath (Join-Path $projectRoot 'app/build/outputs/apk/release/app-release.apk') -Destination $apk
+    $digest = (Get-FileHash -LiteralPath $apk -Algorithm SHA256).Hash.ToLowerInvariant()
+    [System.IO.File]::WriteAllText((Join-Path $artifactDir 'SHA256SUMS.txt'), "$digest  $apkName`n")
+    Write-Output "Signed APK saved to $apk"
+    Write-Output "Signing key retained at $storePath"
+} finally {
+    Pop-Location
+    $env:GAS_SIGNING_STORE = $null
+    $env:GAS_SIGNING_PASSWORD = $null
+    $credential = $null
+}

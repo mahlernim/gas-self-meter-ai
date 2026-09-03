@@ -1,0 +1,74 @@
+{
+  "checked_at_utc": "2026-09-03T10:28:46.519507+00:00",
+  "scope": "Public static frontend and public tariff queries only. No customer account or SMS calls.",
+  "results": [
+    {
+      "name": "gasapp_public_frontend",
+      "url": "https://app.gasapp.co.kr/",
+      "status": 200,
+      "main_script_url": "https://cdn-app.gasapp.co.kr/static/js/main.1b3ee1d43d1adca5d377.js",
+      "script_bytes": 80345,
+      "script_sha256": "547023ef8474e366d3b2f69d4741bcafc5855b3ab538cab4fcd099311b429328",
+      "source_snippets": {
+        "extern/auth/nice/sms/request": null,
+        "extern/auth/nice/sms/confirm": null,
+        "bills/summary": null,
+        "bills/history": null,
+        "usageQty": null,
+        "useContractNum": null,
+        "X-COMPANY": null,
+        "X-Company": null,
+        "companyName": null,
+        "서울도시가스": null,
+        "예스코": null,
+        "삼천리": null
+      }
+    },
+    {
+      "name": "yesco_public_tariff",
+      "url": "https://www.lsyesco.com/Common/connApiServer.do",
+      "status": 200,
+      "success": true,
+      "row_count": 105,
+      "residential_rates": [
+        {
+          "CITYCD": "1",
+          "TYPENAME": "주택취사",
+          "AMOUNT_PERC": "22.52680000"
+        },
+        {
+          "CITYCD": "8",
+          "TYPENAME": "주택취사",
+          "AMOUNT_PERC": "22.62260000"
+        },
+        {
+          "CITYCD": "1",
+          "TYPENAME": "주택난방",
+          "AMOUNT_PERC": "22.52680000"
+        },
+        {
+          "CITYCD": "8",
+          "TYPENAME": "주택난방",
+          "AMOUNT_PERC": "22.62260000"
+        }
+      ]
+    },
+    {
+      "name": "seoul_public_tariff",
+      "url": "https://www.seoulgas.co.kr/front/payment/gasPayTable",
+      "status": 200,
+      "csrf_metadata_present": true,
+      "tariff_response_status": 200,
+      "has_residential_labels": true,
+      "decimal_value_count": 99,
+      "body_bytes": 24728
+    },
+    {
+      "name": "incheon_public_tariff",
+      "url": "https://icgas.co.kr:8443/recruit/dwr/exec/ICGAS.getChargecost.dwr",
+      "status": 200,
+      "expected_rate_field_found": true,
+      "rate": "22.5084"
+    }
+  ]
+}

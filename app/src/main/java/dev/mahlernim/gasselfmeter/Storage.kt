@@ -1,0 +1,114 @@
+package dev.mahlernim.gasselfmeter
+
+import android.content.Context
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
+import android.util.AtomicFile
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
+import java.security.KeyStore
+import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
+import javax.crypto.spec.GCMParameterSpec
+
+object DataCodec {
+    private fun JSONObject.optionalDouble(key: String): Double? = if (isNull(key)) null else getDouble(key)
+    private fun JSONObject.optionalString(key: String): String? = if (isNull(key)) null else getString(key)
+    fun encode(data: AppData, includeCredentials: Boolean = false): String = JSONObject().apply {
+        put("schema", 1)
+        put("ready", data.ready)
+        put("profile", JSONObject().apply {
+            put("providerId", data.profile.providerId); put("meter", data.profile.meter)
+            put("contract", data.profile.contract); put("plannedDate", data.profile.plannedDate)
+            put("syncTime", data.profile.syncTime); put("reminder", data.profile.reminder)
+            put("reminderDay", data.profile.reminderDay); put("reminderHour", data.profile.reminderHour)
+        })
+        put("periods", JSONArray().apply { data.periods.forEach { p -> put(JSONObject().apply {
+            put("start", p.start); put("end", p.end); put("usage", p.usage); put("meter", p.meter)
+            put("previous", p.previous); put("current", p.current); put("billMonth", p.billMonth)
+            put("amount", p.amount); put("unitCost", p.unitCost); put("baseCost", p.baseCost)
+        }) } })
+        put("observations", JSONArray().apply { data.observations.forEach { o -> put(JSONObject().apply {
+            put("time", o.time); put("reading", o.reading); put("meter", o.meter); put("predicted", o.predicted)
+        }) } })
+        if (includeCredentials && data.credentials != null) put("credentials", JSONObject().apply {
+            put("username", data.credentials.username); put("password", data.credentials.password)
+        })
+    }.toString(2)
+
+    fun decode(raw: String, allowCredentials: Boolean = false): AppData {
+        require(raw.length <= 2_000_000) { "파일이 너무 커요. 2MB 이하의 백업 파일을 선택해 주세요." }
+        val json = JSONObject(raw)
+        require(json.getInt("schema") == 1) { "지원하지 않는 백업 형식이에요." }
+        val p = json.getJSONObject("profile")
+        val provider = p.getString("providerId")
+        require(Providers.all.any { it.id == provider }) { "지원하지 않는 공급사 정보예요." }
+        val meter = p.getString("meter").also { require(it.length in 1..100) }
+        val planned = p.optionalString("plannedDate")?.also { java.time.LocalDate.parse(it) }
+        val profile = Profile(provider, meter, p.optString("contract").take(100), planned,
+            if (p.isNull("syncTime")) null else p.getLong("syncTime"),
+            if (allowCredentials) p.optBoolean("reminder") else false,
+            p.optInt("reminderDay", 7).also { require(it in 1..7) }, p.optInt("reminderHour", 19).also { require(it in 0..23) })
+        val rows = json.getJSONArray("periods")
+        require(rows.length() <= 600)
+        val periods = (0 until rows.length()).map { i -> rows.getJSONObject(i).let { r ->
+            UsagePeriod(r.getString("start"), r.getString("end"), r.getDouble("usage"), r.optString("meter", "manual"),
+                r.optionalDouble("previous"), r.optionalDouble("current"), r.optString("billMonth"),
+                r.optionalDouble("amount"), r.optionalDouble("unitCost"), r.optionalDouble("baseCost"))
+        } }
+        Estimator.validatePeriods(periods)
+        val checks = json.getJSONArray("observations")
+        require(checks.length() <= 10_000)
+        val observations = (0 until checks.length()).map { i -> checks.getJSONObject(i).let { r ->
+            Observation(r.getLong("time"), r.getDouble("reading"), r.getString("meter"), r.optionalDouble("predicted"))
+        } }.sortedBy { it.time }
+        observations.forEach {
+            require(it.time in dayStart(java.time.LocalDate.of(2000, 1, 1))..System.currentTimeMillis())
+            require(it.reading.isFinite() && it.reading in 0.0..99_999_999.0)
+            require(it.meter.length in 1..100)
+            require(it.predicted == null || (it.predicted.isFinite() && it.predicted in 0.0..99_999_999.0))
+        }
+        observations.groupBy { it.meter }.values.forEach { group ->
+            group.zipWithNext().forEach { (a, b) -> require(b.time > a.time && b.reading >= a.reading) { "확인 기록의 순서나 지침을 확인해 주세요." } }
+        }
+        val credentials = if (allowCredentials && json.has("credentials")) json.getJSONObject("credentials").let {
+            Credentials(it.getString("username"), it.getString("password"))
+        } else null
+        return AppData(profile, periods, observations, credentials, json.optBoolean("ready", true))
+    }
+}
+
+/** Android Keystore key never leaves the device. Both account secrets and usage data are encrypted. */
+class SecureStore(context: Context) {
+    private val file = AtomicFile(File(context.filesDir, "gas-state.enc"))
+    private val alias = "gas-self-meter-ai.storage.v1"
+    private fun key(): SecretKey {
+        val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        (store.getKey(alias, null) as? SecretKey)?.let { return it }
+        return KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore").apply {
+            init(KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM).setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE).build())
+        }.generateKey()
+    }
+    @Synchronized fun read(): AppData {
+        if (!file.baseFile.exists()) return AppData()
+        val bytes = file.readFully()
+        require(bytes.size in 29..2_500_000 && bytes[0].toInt() == 1) { "저장 파일 형식을 확인할 수 없어요." }
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, bytes.copyOfRange(1, 13)))
+        return DataCodec.decode(String(cipher.doFinal(bytes.copyOfRange(13, bytes.size)), Charsets.UTF_8), true)
+    }
+    @Synchronized fun write(data: AppData) {
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, key())
+        val bytes = byteArrayOf(1) + cipher.iv + cipher.doFinal(DataCodec.encode(data, true).toByteArray(Charsets.UTF_8))
+        val stream = file.startWrite()
+        try { stream.write(bytes); file.finishWrite(stream) } catch (e: Exception) { file.failWrite(stream); throw e }
+    }
+    @Synchronized fun erase() {
+        file.delete()
+        KeyStore.getInstance("AndroidKeyStore").apply { load(null); deleteEntry(alias) }
+    }
+}
