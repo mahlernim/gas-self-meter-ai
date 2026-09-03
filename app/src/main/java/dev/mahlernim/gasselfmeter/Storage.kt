@@ -8,6 +8,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.security.KeyStore
+import java.time.LocalDate
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -17,7 +18,7 @@ object DataCodec {
     private fun JSONObject.optionalDouble(key: String): Double? = if (isNull(key)) null else getDouble(key)
     private fun JSONObject.optionalString(key: String): String? = if (isNull(key)) null else getString(key)
     fun encode(data: AppData, includeCredentials: Boolean = false): String = JSONObject().apply {
-        put("schema", 1)
+        put("schema", 2)
         put("ready", data.ready)
         put("profile", JSONObject().apply {
             put("providerId", data.profile.providerId); put("meter", data.profile.meter)
@@ -33,6 +34,17 @@ object DataCodec {
         put("observations", JSONArray().apply { data.observations.forEach { o -> put(JSONObject().apply {
             put("time", o.time); put("reading", o.reading); put("meter", o.meter); put("predicted", o.predicted)
         }) } })
+        put("submissionSettings", JSONObject().apply {
+            put("enabled", data.submissionSettings.enabled)
+            put("automatic", data.submissionSettings.automatic)
+            put("requireRecentCheck", data.submissionSettings.requireRecentCheck)
+            put("recentDays", data.submissionSettings.recentDays)
+        })
+        put("submissions", JSONArray().apply { data.submissions.forEach { record -> put(JSONObject().apply {
+            put("cycle", record.cycle); put("periodStart", record.periodStart); put("periodEnd", record.periodEnd)
+            put("value", record.value); put("attemptedAt", record.attemptedAt)
+            put("status", record.status); put("detail", record.detail)
+        }) } })
         if (includeCredentials && data.credentials != null) put("credentials", JSONObject().apply {
             put("username", data.credentials.username); put("password", data.credentials.password)
         })
@@ -41,7 +53,7 @@ object DataCodec {
     fun decode(raw: String, allowCredentials: Boolean = false): AppData {
         require(raw.length <= 2_000_000) { "파일이 너무 커요. 2MB 이하의 백업 파일을 선택해 주세요." }
         val json = JSONObject(raw)
-        require(json.getInt("schema") == 1) { "지원하지 않는 백업 형식이에요." }
+        require(json.getInt("schema") in 1..2) { "지원하지 않는 백업 형식이에요." }
         val p = json.getJSONObject("profile")
         val provider = p.getString("providerId")
         require(Providers.all.any { it.id == provider }) { "지원하지 않는 공급사 정보예요." }
@@ -76,7 +88,21 @@ object DataCodec {
         val credentials = if (allowCredentials && json.has("credentials")) json.getJSONObject("credentials").let {
             Credentials(it.getString("username"), it.getString("password"))
         } else null
-        return AppData(profile, periods, observations, credentials, json.optBoolean("ready", true))
+        val settings = if (allowCredentials && json.has("submissionSettings")) json.getJSONObject("submissionSettings").let {
+            SubmissionSettings(it.optBoolean("enabled"), it.optBoolean("automatic"),
+                it.optBoolean("requireRecentCheck", true), it.optInt("recentDays", 7).also { days -> require(days in 1..30) })
+        } else SubmissionSettings()
+        val submissionRows = json.optJSONArray("submissions")
+        require(submissionRows == null || submissionRows.length() <= 100)
+        val submissions = if (submissionRows == null) emptyList() else (0 until submissionRows.length()).map { i ->
+            submissionRows.getJSONObject(i).let { row ->
+                SubmissionRecord(row.getString("cycle").take(80), LocalDate.parse(row.getString("periodStart")).toString(),
+                    LocalDate.parse(row.getString("periodEnd")).toString(), row.getDouble("value").also { require(it.isFinite() && it in 0.0..99_999_999.0) },
+                    row.getLong("attemptedAt"), row.getString("status").also { require(it in setOf("pending", "confirmed", "uncertain", "rejected")) },
+                    row.optString("detail").take(300))
+            }
+        }
+        return AppData(profile, periods, observations, credentials, settings, submissions, json.optBoolean("ready", true))
     }
 }
 

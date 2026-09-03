@@ -2,6 +2,7 @@ package dev.mahlernim.gasselfmeter
 
 import org.junit.Assert.*
 import org.junit.Test
+import org.json.JSONObject
 
 class ProviderAndBackupTest {
     private fun fixture(month: String = "202501", current: String = "120", corrected: String = "20"): String = """
@@ -25,8 +26,9 @@ class ProviderAndBackupTest {
         assertThrows(IllegalStateException::class.java) { BusanClient.parseBill(fixture(), "202502") }
         assertThrows(IllegalStateException::class.java) { BusanClient.parseBill(fixture(current = "121"), "202501") }
         assertThrows(IllegalStateException::class.java) { BusanClient.parseContracts("<input type='password'>") }
-        val contracts = BusanClient.parseContracts("<script>var data={BPNO:'1234'}</script><input id='list_cano_1' value='5678'><input id='list_cano_2' value='9012'>")
+        val contracts = BusanClient.parseContracts("<script>var data={BPNO:'1234'}</script><input id='list_cano_1' value='5678'><input id='list_bpname_1' value='synthetic'><input id='list_cano_2' value='9012'>")
         assertEquals(2, contracts.size)
+        assertEquals("synthetic", contracts.first().name)
     }
     @Test fun portableBackupNeverContainsCredentialsAndImportIgnoresInjectedCredentials() {
         val data = AppData(periods = BusanClient.parseBill(fixture(), "202501"), credentials = Credentials("synthetic-user", "synthetic-secret"), ready = true)
@@ -41,6 +43,17 @@ class ProviderAndBackupTest {
     @Test fun unsupportedSchemaAndFutureObservationsCannotBeImported() {
         val data = AppData(observations = listOf(Observation(System.currentTimeMillis() + 86_400_000, 100.0, "manual")))
         assertThrows(IllegalArgumentException::class.java) { DataCodec.decode(DataCodec.encode(data)) }
-        assertThrows(IllegalArgumentException::class.java) { DataCodec.decode(DataCodec.encode(AppData()).replace("\"schema\": 1", "\"schema\": 9")) }
+        assertThrows(IllegalArgumentException::class.java) { DataCodec.decode(DataCodec.encode(AppData()).replace("\"schema\": 2", "\"schema\": 9")) }
+    }
+    @Test fun versionOneStateMigratesWithSubmissionDisabled() {
+        val legacy = JSONObject(DataCodec.encode(AppData(ready = true))).apply {
+            put("schema", 1)
+            remove("submissionSettings")
+            remove("submissions")
+        }
+        val restored = DataCodec.decode(legacy.toString(), allowCredentials = true)
+        assertTrue(restored.ready)
+        assertFalse(restored.submissionSettings.enabled)
+        assertTrue(restored.submissions.isEmpty())
     }
 }

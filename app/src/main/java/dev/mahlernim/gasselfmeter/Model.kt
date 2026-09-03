@@ -2,6 +2,7 @@ package dev.mahlernim.gasselfmeter
 
 import java.time.*
 import java.time.temporal.ChronoUnit
+import java.util.concurrent.locks.ReentrantLock
 import kotlin.math.*
 
 val Korea: ZoneId = ZoneId.of("Asia/Seoul")
@@ -34,12 +35,65 @@ data class Profile(
     val reminderDay: Int = 7, val reminderHour: Int = 19,
 )
 data class Credentials(val username: String, val password: String)
+data class SubmissionSettings(
+    val enabled: Boolean = false,
+    val automatic: Boolean = false,
+    val requireRecentCheck: Boolean = true,
+    val recentDays: Int = 7,
+)
+data class SubmissionRecord(
+    val cycle: String,
+    val periodStart: String,
+    val periodEnd: String,
+    val value: Double,
+    val attemptedAt: Long,
+    val status: String,
+    val detail: String,
+)
 data class AppData(
     val profile: Profile = Profile(), val periods: List<UsagePeriod> = emptyList(),
     val observations: List<Observation> = emptyList(), val credentials: Credentials? = null,
+    val submissionSettings: SubmissionSettings = SubmissionSettings(),
+    val submissions: List<SubmissionRecord> = emptyList(),
     val ready: Boolean = false,
 )
 data class Estimate(val reading: Double?, val daily: Double?, val source: String, val ageDays: Long?, val anchorTime: Long?)
+data class SubmissionDecision(val allowed: Boolean, val value: Double?, val reason: String)
+object SubmissionGate { val lock = ReentrantLock() }
+
+object SubmissionPolicy {
+    fun decide(data: AppData, target: SelfReadTarget?, time: Long = System.currentTimeMillis(), automatic: Boolean): SubmissionDecision {
+        val settings = data.submissionSettings
+        if (!settings.enabled) return SubmissionDecision(false, null, "검침값 입력 기능이 꺼져 있어요.")
+        if (automatic && !settings.automatic) return SubmissionDecision(false, null, "마지막 날 자동 입력이 꺼져 있어요.")
+        if (data.profile.providerId != "busan" || data.profile.meter == "demo") return SubmissionDecision(false, null, "부산도시가스 연결 계정에서만 사용할 수 있어요.")
+        if (automatic && data.credentials == null) return SubmissionDecision(false, null, "자동 입력에 필요한 로그인 정보가 저장되어 있지 않아요.")
+        if (target == null) return SubmissionDecision(false, null, "먼저 공급사에서 검침 기간을 확인해 주세요.")
+        if (!target.eligible) return SubmissionDecision(false, null, "이 계약은 자가검침 대상이 아니에요.")
+        if (target.submitted) return SubmissionDecision(false, target.submittedValue, "이번 검침값은 이미 입력되어 있어요.")
+        val date = dateOf(time)
+        val start = LocalDate.parse(target.start)
+        val end = LocalDate.parse(target.end)
+        if (date !in start..end) return SubmissionDecision(false, null, "입력 가능 기간은 ${target.start}부터 ${target.end}까지예요.")
+        if (automatic && date != end) return SubmissionDecision(false, null, "자동 입력은 검침 기간 마지막 날에 실행해요.")
+        val prior = data.submissions.lastOrNull { it.cycle == target.cycle }
+        if (prior?.status in setOf("pending", "confirmed", "uncertain")) {
+            return SubmissionDecision(false, prior?.value, if (prior?.status == "confirmed") "이번 검침값 입력을 완료했어요." else "이전 전송 결과를 먼저 공급사에서 확인해 주세요.")
+        }
+        val latest = data.observations.lastOrNull { it.meter == data.profile.meter }
+            ?: return SubmissionDecision(false, null, "실제 계량기 숫자를 먼저 확인해 주세요.")
+        val age = ((time - latest.time) / 86_400_000).coerceAtLeast(0)
+        if (settings.requireRecentCheck && age > settings.recentDays) {
+            return SubmissionDecision(false, null, "마지막 실측 확인이 ${age}일 전이에요. ${settings.recentDays}일 이내에 다시 확인해 주세요.")
+        }
+        val estimated = Estimator.estimate(data, time).reading
+            ?: return SubmissionDecision(false, null, "제출할 현재 누적 지침을 계산할 수 없어요.")
+        val value = kotlin.math.round(estimated * 10.0) / 10.0
+        if (target.previousValue != null && value < target.previousValue) return SubmissionDecision(false, value, "계산한 값이 공급사의 이전 검침값보다 작아 입력하지 않아요.")
+        val reason = if (automatic) "오늘은 검침 기간 마지막 날이며, 마지막 실측 확인이 ${age}일 전이에요." else "검침 기간과 기존 입력 여부를 확인했어요."
+        return SubmissionDecision(true, value, reason)
+    }
+}
 
 /** Local adaptive estimate. No external AI service, invented readings or fitted accuracy claims. */
 object Estimator {
