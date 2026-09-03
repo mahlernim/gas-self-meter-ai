@@ -18,7 +18,7 @@ class AppFlowTest {
         InstrumentationRegistry.getInstrumentation().waitForIdleSync()
         android.os.SystemClock.sleep(750)
         val image = InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()
-        File(context.filesDir, "$name.png").outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        File(requireNotNull(context.getExternalFilesDir(null)), "$name.png").outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
         image.recycle()
     }
     @Test fun onboardingDemoCalibrationPersistenceAndHistory() {
@@ -34,7 +34,11 @@ class AppFlowTest {
             compose.onNodeWithText("예시 데이터 · 실제 우리 집 기록이 아니에요").assertIsDisplayed()
             shot("02-meter")
             compose.onNodeWithText("제출", useUnmergedTree = true).performClick()
-            compose.onNodeWithText("검침값 입력").assertIsDisplayed()
+            compose.onNodeWithText("자가검침 제출").assertIsDisplayed()
+            compose.onAllNodes(isToggleable())[0].performClick()
+            compose.onNodeWithText("검침 기간 마지막 날 자동 제출").assertIsDisplayed()
+            compose.onAllNodes(isToggleable())[1].performClick()
+            compose.onNodeWithText("7일 이내").assertIsDisplayed()
             shot("03-submission")
             compose.onNodeWithText("검침", useUnmergedTree = true).performClick()
             compose.onNodeWithText("계량기 보고 확인하기").performClick()
