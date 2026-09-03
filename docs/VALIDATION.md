@@ -1,28 +1,28 @@
 # First-release validation
 
-## 0.2.1 개발 검증
+## 0.2.2 개발 검증
 
-2026년 9월 4일 현재 검침값 직접 입력과 조건부 자동 입력 구현을 Closed Alpha에서 검증합니다.
+2026년 9월 4일 현재 기록 탭의 24개월 조회와 월별 상세 표시를 포함한 Closed Alpha 빌드를 검증합니다.
 
-- 합성 데이터 단위검사 18개가 통과했습니다. 자동 입력의 마지막 날 제한, 최근 실측 기간, 불확실 전송 재시도 금지, SK E&S 공급사 범위와 백업 복원 시 자동 입력 해제를 포함합니다.
-- API 35 가상 기기에서 가상 데이터 흐름을 확인했습니다. `검침`, `제출`, `기록`, `설정` 탐색과 암호화 저장 후 화면 반영이 통과했습니다.
+- 합성 데이터 단위검사 21개가 통과했습니다. 24개월 요약, 정확히 일치하는 청구월 금액만 표시하는 조건, 자동 입력의 안전 조건과 백업 복원을 포함합니다.
+- API 35 가상 기기에서 가상 데이터 흐름을 확인했습니다. `검침`, `제출`, `기록`, `설정` 탐색, 24개월 차트 선택, 청구월 가스비 표시와 암호화 저장 후 화면 반영이 통과했습니다.
 - SK E&S 공통 포털의 제출 필드와 가능 기간 판정은 공식 페이지 코드에서 확인했습니다. 부산은 허가받은 계정으로 조회했으며 다른 지역은 공통 포털 구조와 공급사 설정을 검증했습니다.
 - 실제 고객 계정으로 제출 요청을 보내지는 않았습니다. 최초 실제 검증은 정확한 계량기 값, 입력 가능 기간과 사용자의 별도 승인을 확인한 뒤 한 번만 수행해야 합니다.
-- 실제 제출은 아직 검증되지 않았습니다. 0.2.1은 제출 기능이 기본적으로 꺼진 Closed Alpha로만 배포하며, 테스터에게 이 제한을 명시합니다.
+- 실제 제출은 아직 검증되지 않았습니다. 0.2.2는 제출 기능이 기본적으로 꺼진 Closed Alpha로만 배포하며, 테스터에게 이 제한을 명시합니다.
 
-Checked on 2026-09-04 for v0.2.1.
+Checked on 2026-09-04 for v0.2.2.
 
 | Check | Result |
 | --- | --- |
-| JVM tests | 12 passed, covering estimation, meter changes, corrections, stale data, monotonic cumulative forecasts, parsing and portable backups |
+| JVM tests | 21 passed, covering history summaries, estimation, meter changes, corrections, stale data, submission policy, parsing and portable backups |
 | Android lint | No errors. Advisory warnings remain for newer available dependencies/API targets and minor style suggestions |
-| Android onboarding and demo | Passed on API 35, including confirmed adjustment, encrypted persistence across activity recreation, history and settings |
+| Android onboarding and demo | Passed on API 35, including confirmed adjustment, encrypted persistence, 24-month history selection, exact bill-month amount and settings |
 | Manual and file workflow | Passed on API 35 through the actual system document picker, including manual reading, historical usage, JSON export and restore |
 | Reminder | UI toggle persisted, weekly work enqueued, the same worker delivered a notification in a test-triggered immediate run, and disabling reminders removed the notification |
 | Busan account access | Authorized Android read-only probe passed for one contract and all 13 advertised billing months, matching current meter identity and a computable seasonal estimate |
 | Release signing | App-specific RSA 4096-bit key. APK Signature Scheme v2 verification passed |
 | APK alignment | `zipalign -c -P 16 4` passed |
-| Package metadata | `dev.mahlernim.gasselfmeter`, version code 1, version name 0.1.0, min API 26, target API 36 |
+| Package metadata | `dev.mahlernim.gasselfmeter`, version code 5, version name 0.2.2, min API 26, target API 36 |
 
 The Android live probe caught compact `YYYYMMDD` provider dates that the initial Kotlin parser did not accept. The parser was corrected, a regression check was added and the live probe passed afterward. It never called a submission endpoint. Credentials were delivered through hidden input and stdin to a private temporary debug-app file, removed before networking. They were not stored in the repository, exported, or included in screenshots.
 
