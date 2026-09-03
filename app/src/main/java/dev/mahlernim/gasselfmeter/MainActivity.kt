@@ -377,13 +377,17 @@ class MainActivity : ComponentActivity() {
     val settings = data.submissionSettings
     val decision = SubmissionPolicy.decide(data, target, now, automatic = false)
     val provider = Providers.get(data.profile.providerId)
+    val demo = data.profile.meter == "demo"
+    val demoDate = dateOf(now)
+    val demoValue = Estimator.estimate(data, now).reading?.let { kotlin.math.round(it * 10.0) / 10.0 }
     Page {
-        Title("검침값 입력", "검침 기간을 확인하고 앱이 계산한 누적 지침을 ${provider.name}에 입력해요.")
+        Title("자가검침 제출", "기간과 숫자를 확인해 직접 제출하거나, 조건을 정해 마지막 날 자동으로 제출해요.")
+        if (demo) Badge("예시 데이터 · 실제로 제출되지 않아요")
         SurfaceCard {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("공급사 검침값 입력 사용", fontWeight = FontWeight.Bold)
-                    Text("실제 공급사 기록을 변경하는 기능이에요", color = Muted, style = MaterialTheme.typography.bodySmall)
+                    Text("공급사 제출 기능", fontWeight = FontWeight.Bold)
+                    Text("확인한 누적 지침을 실제 공급사 기록에 입력해요", color = Muted, style = MaterialTheme.typography.bodySmall)
                 }
                 Switch(checked = settings.enabled, onCheckedChange = { changeSettings(it, settings.automatic, settings.requireRecentCheck, settings.recentDays) })
             }
@@ -392,12 +396,12 @@ class MainActivity : ComponentActivity() {
                 if (provider.automaticSubmission) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
-                            Text("검침 기간 마지막 날 자동 입력", fontWeight = FontWeight.Medium)
+                            Text("검침 기간 마지막 날 자동 제출", fontWeight = FontWeight.Medium)
                             Text("당일 최신 상태를 다시 확인한 뒤 한 번만 전송해요", color = Muted, style = MaterialTheme.typography.bodySmall)
                         }
                         Switch(checked = settings.automatic, onCheckedChange = { changeSettings(true, it, settings.requireRecentCheck, settings.recentDays) })
                     }
-                } else Text("이 공급사는 사용자가 값을 확인하는 직접 입력만 지원해요.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                } else Text("이 공급사는 사용자가 값을 확인하는 직접 제출만 지원해요.", color = Muted, style = MaterialTheme.typography.bodySmall)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("최근 실측이 있을 때만", fontWeight = FontWeight.Medium)
@@ -408,12 +412,18 @@ class MainActivity : ComponentActivity() {
                 if (settings.requireRecentCheck) Choice("허용 기간", "${settings.recentDays}일 이내", (1..30).map { "${it}일 이내" }) {
                     changeSettings(true, settings.automatic, true, it.substringBefore("일").toInt())
                 }
-                if (settings.automatic && data.credentials == null) Text("자동 입력을 사용하려면 설정에서 로그인 정보를 암호화해 저장해야 해요.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                if (settings.automatic && data.credentials == null && !demo) Text("자동 제출을 사용하려면 설정에서 로그인 정보를 암호화해 저장해야 해요.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
             }
         }
         SurfaceCard {
             Text("이번 제출 상태", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-            if (target == null) {
+            if (demo) {
+                val month = YearMonth.from(demoDate)
+                Text("${month.atDay(20)} ~ ${month.atDay(25)}", color = Muted, style = MaterialTheme.typography.bodySmall)
+                Text(demoValue?.let { "입력 예정 ${decimalText(it)} m³" } ?: "입력할 숫자를 계산하는 중", fontSize = 28.sp, fontWeight = FontWeight.Bold)
+                Text("최근 실측 7일 전 · 기존 제출 없음", color = Muted, style = MaterialTheme.typography.bodySmall)
+                ActionButton(demoValue?.let { "${decimalText(it)} m³ 직접 제출" } ?: "직접 제출", Icons.Outlined.CloudUpload, false) {}
+            } else if (target == null) {
                 Text("공급사에서 검침 기간을 확인해 주세요.", color = Muted)
             } else {
                 Text("${target.start} ~ ${target.end}", color = Muted, style = MaterialTheme.typography.bodySmall)
@@ -423,11 +433,13 @@ class MainActivity : ComponentActivity() {
                     else -> Text("아직 입력할 수 없어요", fontSize = 23.sp, fontWeight = FontWeight.Bold)
                 }
             }
-            Text(decision.reason, color = Muted, style = MaterialTheme.typography.bodySmall)
-            ActionButton("검침 기간과 제출 상태 새로 확인", Icons.Outlined.Refresh, !busy, refresh)
-            if (decision.allowed && decision.value != null) ActionButton("${decimalText(decision.value)} m³ 직접 입력", Icons.Outlined.CloudUpload, !busy) { submit(decision.value) }
+            if (!demo) {
+                Text(decision.reason, color = Muted, style = MaterialTheme.typography.bodySmall)
+                ActionButton("검침 기간과 제출 상태 새로 확인", Icons.Outlined.Refresh, !busy, refresh)
+                if (decision.allowed && decision.value != null) ActionButton("${decimalText(decision.value)} m³ 직접 제출", Icons.Outlined.CloudUpload, !busy) { submit(decision.value) }
+            }
         }
-        Hint(Icons.Outlined.Security, "자동 입력은 마지막 날에만 실행됩니다. 공급사 상태, 이전 검침값, 최근 실측 시점과 중복 전송 기록을 확인하고 조건이 하나라도 맞지 않으면 보내지 않아요.")
+        Hint(Icons.Outlined.Security, "자동 제출은 마지막 날에만 실행됩니다. 공급사 상태, 이전 검침값, 최근 실측 시점과 중복 전송 기록을 확인하고 조건이 하나라도 맞지 않으면 보내지 않아요.")
         if (data.submissions.isNotEmpty()) Text("최근 입력 결과", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         data.submissions.sortedByDescending { it.attemptedAt }.take(5).forEach { record ->
             SurfaceCard {
@@ -526,7 +538,7 @@ class MainActivity : ComponentActivity() {
             SettingAction("오류 신고", Icons.Outlined.BugReport, { open(AppLinks.ISSUES) })
             SettingAction("오픈소스 라이선스", Icons.Outlined.Policy, licenses)
         }
-        Hint(Icons.Outlined.PrivacyTip, "계정 로그인, 청구 조회와 선택한 검침값 입력만 공급사에 직접 전송해요. 계산은 기기 안에서 이루어지며 광고와 사용자 추적 기능은 없어요.")
+        Hint(Icons.Outlined.PrivacyTip, "계정 로그인, 청구 조회와 선택한 검침값 제출만 공급사에 직접 전송해요. 계산은 기기 안에서 이루어지며 광고와 사용자 추적 기능은 없어요.")
         Text("추정은 작년 계절 흐름과 최근 실측을 함께 사용해요. 외부 AI에 계정이나 생활 데이터를 보내지 않으며 정확도 범위를 보장하지 않아요.", color = Muted, style = MaterialTheme.typography.bodySmall)
         Text("똑똑 자가검침 AI  ${BuildConfig.VERSION_NAME}\n독립적으로 만든 비공식 앱이에요.", color = Muted, style = MaterialTheme.typography.bodySmall)
     }
