@@ -1,6 +1,14 @@
 # Korean gas-provider integration research
 
-Checked on 2026-09-03. Source inspection, public endpoint tests and authenticated tests are different evidence levels. Only Busan account retrieval is enabled in v0.1.0.
+## 부산도시가스 검침값 입력
+
+0.2.0은 단순 기록을 넘어 공급사의 자가검침 가능 기간과 기존 입력 상태를 확인하고, 계산한 누적 지침을 직접 또는 조건부로 자동 입력하도록 설계했습니다. 자동 입력은 기본적으로 꺼져 있으며 검침 기간 마지막 날에만 실행합니다.
+
+공식 자가검침 페이지에서 입력 주소와 필드 구조를 확인했습니다. 대상 조회 응답의 기간, 자가검침 대상 여부, 이전 지침, 계량기 식별값과 내부 식별값을 그대로 사용합니다. 제출 전후에 공급사 상태를 조회하고 결과가 불확실하면 다시 보내지 않습니다.
+
+2026년 9월 4일 현재 실제 제출은 수행하지 않았습니다. 정확한 계량기 값과 입력 가능 기간을 확인한 사용자 계정에서 단 한 번의 직접 입력을 검증하기 전까지 이 기능이 실제 공급사에서 정상 완료된다고 단정하지 않습니다.
+
+아래 내용은 2026년 9월 3일에 수행한 공급사 연동 조사 기록입니다. 소스 확인, 공개 주소 조회와 인증 계정 검증은 서로 다른 수준의 근거입니다.
 
 ## Useful code beyond SK E&S
 
