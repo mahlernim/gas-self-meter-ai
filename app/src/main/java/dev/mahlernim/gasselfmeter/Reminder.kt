@@ -39,7 +39,8 @@ object SubmissionScheduler {
         val manager = WorkManager.getInstance(context)
         manager.cancelUniqueWork(WORK)
         manager.cancelUniqueWork("$WORK-now")
-        if (!data.submissionSettings.enabled || !data.submissionSettings.automatic || data.credentials == null) return
+        if (!data.submissionSettings.enabled || !data.submissionSettings.automatic || data.credentials == null ||
+            !Providers.get(data.profile.providerId).automaticSubmission) return
         val now = ZonedDateTime.now(Korea)
         var next = now.withHour(10).withMinute(0).withSecond(0).withNano(0)
         if (next <= now) next = next.plusDays(1)
@@ -63,8 +64,9 @@ class SubmissionWorker(context: Context, params: WorkerParameters) : Worker(cont
         if (!data.submissionSettings.enabled || !data.submissionSettings.automatic) return Result.success()
         var pending: SubmissionRecord? = null
         val detail = try {
-            BusanClient(credentials).use { client ->
-                val contract = client.login().find { BusanClient.opaque("C000:${it.bp}:${it.ca}") == data.profile.contract }
+            val provider = Providers.skens(data.profile.providerId)
+            SkensClient(provider, credentials).use { client ->
+                val contract = client.login().find { SkensClient.contractKey(provider, it) == data.profile.contract }
                     ?: return Result.success()
                 val target = client.selfReadTarget(contract)
                 val decision = SubmissionPolicy.decide(data, target, System.currentTimeMillis(), automatic = true)

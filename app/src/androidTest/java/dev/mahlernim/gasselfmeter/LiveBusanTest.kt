@@ -16,7 +16,7 @@ class LiveBusanTest {
         val raw = try { input.readText() } finally { input.delete() }
         val json = JSONObject(raw)
         val credentials = Credentials(json.getString("username"), json.getString("password"))
-        BusanClient(credentials).use { client ->
+        SkensClient(Providers.skens("busan"), credentials).use { client ->
             val contracts = client.login()
             assertEquals("This probe expects the authorized single-contract test account", 1, contracts.size)
             val result = client.history(contracts.single()) {}

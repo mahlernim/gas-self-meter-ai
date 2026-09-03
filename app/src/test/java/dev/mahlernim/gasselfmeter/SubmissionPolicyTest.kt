@@ -43,6 +43,14 @@ class SubmissionPolicyTest {
         assertTrue(decision.reason.contains("확인"))
     }
 
+    @Test fun submissionSupportsConfiguredSkensProvidersOnly() {
+        val koone = data().copy(profile = data().profile.copy(providerId = "koone"))
+        assertTrue(SubmissionPolicy.decide(koone, target, time, automatic = false).allowed)
+        assertFalse(SubmissionPolicy.decide(koone, target, time, automatic = true).allowed)
+        val seoul = data().copy(profile = data().profile.copy(providerId = "seoul"))
+        assertFalse(SubmissionPolicy.decide(seoul, target, time, automatic = false).allowed)
+    }
+
     @Test fun portableBackupKeepsAuditHistoryButDisablesAutomaticSubmission() {
         val record = SubmissionRecord("cycle", target.start, target.end, 107.0, time, "confirmed", "완료")
         val original = data(records = listOf(record))

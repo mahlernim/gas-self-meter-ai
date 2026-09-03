@@ -34,7 +34,8 @@ data class SubmissionOutcome(val accepted: Boolean, val confirmed: Boolean)
 data class SyncResult(val periods: List<UsagePeriod>, val meter: String, val planned: String?, val warning: String?, val selfRead: SelfReadTarget?)
 
 /** Independent read-only client with an explicit endpoint allowlist. */
-class BusanClient(private val credentials: Credentials) : AutoCloseable {
+class SkensClient(private val provider: Provider, private val credentials: Credentials) : AutoCloseable {
+    init { require(provider.skens && provider.skensCode != null) { "지원하지 않는 자동 연결 공급사예요." } }
     private val cookies = mutableListOf<Cookie>()
     private val client = OkHttpClient.Builder().connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(25, TimeUnit.SECONDS).callTimeout(30, TimeUnit.SECONDS)
@@ -48,8 +49,8 @@ class BusanClient(private val credentials: Credentials) : AutoCloseable {
     private val allowed = setOf("login/login.do", "login/loginProcess.do", "read/selfRead.do", "read/call_EBPP_018.do", "read/insertSelfRead.do", "charge/askDetail.do")
     private fun request(path: String, data: Map<String, String>? = null): String {
         require(path in allowed)
-        val builder = Request.Builder().url("https://ebpp.skens.com/busan/$path")
-            .header("Referer", "https://ebpp.skens.com/busan/main/index.do")
+        val builder = Request.Builder().url("https://ebpp.skens.com/${provider.id}/$path")
+            .header("Referer", "https://ebpp.skens.com/${provider.id}/main/index.do")
         if (data != null) builder.post(FormBody.Builder().apply { data.forEach { (k, v) -> add(k, v) } }.build())
         return client.newCall(builder.build()).execute().use { response ->
             check(response.isSuccessful) { "도시가스 사이트에 연결하지 못했어요. 잠시 후 다시 시도해 주세요." }
@@ -61,7 +62,7 @@ class BusanClient(private val credentials: Credentials) : AutoCloseable {
     }
     fun login(): List<Contract> {
         request("login/login.do")
-        val result = JSONObject(request("login/loginProcess.do", mapOf("id" to credentials.username, "pw" to credentials.password, "returnURL" to "/busan/read/selfRead.do")))
+        val result = JSONObject(request("login/loginProcess.do", mapOf("id" to credentials.username, "pw" to credentials.password, "returnURL" to "/${provider.id}/read/selfRead.do")))
         check(result.optString("errCd") == "S") { "로그인하지 못했어요. 아이디와 비밀번호를 확인해 주세요." }
         return parseContracts(request("read/selfRead.do")).also { check(it.isNotEmpty()) { "연결된 계약이 없어요. 공급사 홈페이지에서 사용 계약을 확인해 주세요." } }
     }
@@ -104,7 +105,7 @@ class BusanClient(private val credentials: Credentials) : AutoCloseable {
         val meter = opaque(serial(meterRow))
         val planned = meterRow.optString("ADATSOLL1").takeIf { it.isNotBlank() }?.let(::parsePortalDate)
         val target = parseSelfReadTarget(meterRow, contract)
-        val params = mapOf("bpno" to contract.bp, "cano" to contract.ca, "compcd" to "C000", "GUBUN" to "02")
+        val params = mapOf("bpno" to contract.bp, "cano" to contract.ca, "compcd" to provider.skensCode!!, "GUBUN" to "02")
         val first = request("charge/askDetail.do", params + ("date" to ""))
         document(first)
         val selected = Jsoup.parse(first).selectFirst("#budat")?.attr("value")
@@ -157,6 +158,7 @@ class BusanClient(private val credentials: Credentials) : AutoCloseable {
     override fun close() { synchronized(cookies) { cookies.clear() }; client.connectionPool.evictAll(); client.dispatcher.executorService.shutdown() }
 
     companion object {
+        fun contractKey(provider: Provider, contract: Contract) = opaque("${provider.skensCode}:${contract.bp}:${contract.ca}")
         fun parsePortalDate(value: String): String = LocalDate.parse(value.replace('.', '-').replace('/', '-'),
             if (value.matches(Regex("\\d{8}"))) java.time.format.DateTimeFormatter.BASIC_ISO_DATE else java.time.format.DateTimeFormatter.ISO_LOCAL_DATE).toString()
         fun opaque(text: String) = MessageDigest.getInstance("SHA-256").digest(text.toByteArray()).take(12).joinToString("") { "%02x".format(it) }
