@@ -52,6 +52,8 @@ class AppFlowTest {
             shot("04-history")
             assertEquals(saved, SecureStore(context).read())
             compose.onNodeWithText("설정", useUnmergedTree = true).performClick()
+            compose.onNodeWithText("업데이트 확인").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithText("Google Play에서 최신 버전을 확인해요").assertIsDisplayed()
             shot("05-settings")
         }
     }
