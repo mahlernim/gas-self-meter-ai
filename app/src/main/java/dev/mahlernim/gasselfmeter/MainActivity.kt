@@ -14,6 +14,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -452,40 +454,59 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable private fun HistoryPage(data: AppData, add: () -> Unit, delete: (UsagePeriod) -> Unit, deleteObservation: (Observation) -> Unit) {
+    val months = remember(data.periods) { HistorySummary.months(data.periods, YearMonth.from(today())) }
+    var selectedMonth by rememberSaveable { mutableStateOf<String?>(null) }
+    val selected = months.find { it.month.toString() == selectedMonth }
+    val chartScroll = rememberScrollState(Int.MAX_VALUE)
+    LaunchedEffect(chartScroll.maxValue) { chartScroll.scrollTo(chartScroll.maxValue) }
     Page {
         Title("우리 집 사용 흐름", "청구서에 표시된 실제 사용량을 모아요.")
         SurfaceCard {
-            Text("최근 12개월", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            val months = (1L..12L).map { YearMonth.from(today()).minusMonths(it) }.reversed()
-            val values = months.map { m -> Estimator.monthlyRate(data.periods, m)?.times(m.lengthOfMonth()) }
-            val max = values.filterNotNull().maxOrNull()?.coerceAtLeast(1.0) ?: 1.0
-            Row(Modifier.fillMaxWidth().height(150.dp), horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.Bottom) {
-                months.forEachIndexed { i, month ->
-                    Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                        Box(Modifier.fillMaxWidth().height(((values[i] ?: 0.0) / max * 113).dp.coerceAtLeast(3.dp)).clip(RoundedCornerShape(topStart = 5.dp, topEnd = 5.dp)).background(if (values[i] == null) Color(0xFFDCE2DC) else if (i == 11) Coral else Teal)
-                            .semantics { contentDescription = "${month} ${values[i]?.let { decimalText(it) + " 세제곱미터" } ?: "이력 없음"}" })
-                        Text("${month.monthValue}", fontSize = 10.sp, color = Muted)
+            Text("최근 24개월", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            val max = months.mapNotNull { it.usage }.maxOrNull()?.coerceAtLeast(1.0) ?: 1.0
+            Row(Modifier.fillMaxWidth().height(156.dp).horizontalScroll(chartScroll), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.Bottom) {
+                months.forEach { point ->
+                    val chosen = selectedMonth == point.month.toString()
+                    val description = buildString {
+                        append("${point.month.year}년 ${point.month.monthValue}월, ")
+                        append(point.usage?.let { "사용량 ${decimalText(it)} 세제곱미터" } ?: "사용 이력 없음")
+                        point.billedAmount?.let { append(", 청구월 합계 ${decimalText(it, 0)}원") }
+                    }
+                    Column(Modifier.width(30.dp).clickable { selectedMonth = point.month.toString() }
+                        .semantics { contentDescription = description }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                        Box(Modifier.width(24.dp).height(((point.usage ?: 0.0) / max * 112).dp.coerceAtLeast(3.dp))
+                            .background(if (point.usage == null) Color(0xFFDCE2DC) else if (chosen) Coral else Teal))
+                        Text(if (point.month.monthValue == 1) "${point.month.year}\n1" else "${point.month.monthValue}", fontSize = 9.sp, lineHeight = 10.sp, color = if (chosen) Ink else Muted)
                     }
                 }
             }
-            Text("m³ · 기간별 사용량을 날짜에 나눠 월별로 환산했어요. 회색은 이력이 없는 달이에요.", style = MaterialTheme.typography.bodySmall, color = Muted)
+            if (selected != null) {
+                HorizontalDivider()
+                Text("${selected.month.year}년 ${selected.month.monthValue}월", fontWeight = FontWeight.Bold)
+                Text(selected.usage?.let { "사용량 ${decimalText(it)} m³" } ?: "사용량 이력 없음", color = if (selected.usage == null) Muted else Ink)
+                Text(selected.billedAmount?.let { "가스비 ${decimalText(it, 0)}원 · 해당 청구월의 실제 합계" } ?: "가스비 정보 없음", color = Muted, style = MaterialTheme.typography.bodySmall)
+            } else Text("막대를 누르면 월별 사용량과 가스비를 볼 수 있어요.", style = MaterialTheme.typography.bodySmall, color = Muted)
+            Text("기간별 사용량을 날짜에 나눠 월별로 환산했어요. 회색은 이력이 없는 달이며 가스비는 정확히 일치하는 청구월 합계만 표시해요.", style = MaterialTheme.typography.bodySmall, color = Muted)
         }
         ActionButton("과거 사용량 추가", Icons.Outlined.Add, onClick = add)
         Hint(Icons.Outlined.Lightbulb, "작년 같은 달과 앞뒤 달의 이력이 있으면 좋아요. 청구월보다 실제 사용 기간을 정확히 입력해 주세요.")
         if (data.periods.isEmpty()) EmptyNote("아직 사용 이력이 없어요", "공급사 홈페이지나 청구서에서 과거 사용량을 확인해 입력해 주세요.")
-        data.periods.sortedByDescending { it.end }.forEach { period ->
-            SurfaceCard {
+        data.periods.sortedByDescending { it.end }.forEachIndexed { index, period ->
+            Column(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Column(Modifier.weight(1f)) {
                         Text("${period.start} ~ ${period.end}", color = Muted, style = MaterialTheme.typography.labelMedium)
-                        Text("${decimalText(period.usage)} m³", fontSize = 23.sp, fontWeight = FontWeight.Bold)
-                        if (period.billMonth.isNotBlank()) Text("${period.billMonth.take(4)}년 ${period.billMonth.takeLast(2)}월 청구", color = Muted, style = MaterialTheme.typography.bodySmall)
+                        Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("${decimalText(period.usage)} m³", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                            if (period.billMonth.isNotBlank()) Text("${period.billMonth.take(4)}.${period.billMonth.takeLast(2)} 청구", color = Muted, style = MaterialTheme.typography.bodySmall)
+                        }
                     }
                     IconButton(onClick = { delete(period) }) { Icon(Icons.Outlined.DeleteOutline, "이 사용 이력 삭제") }
                 }
                 if (period.previous != null && period.current != null) Text("누적 지침 ${decimalText(period.previous)} → ${decimalText(period.current)}", color = Muted, style = MaterialTheme.typography.bodySmall)
-                if (period.amount != null) Text("청구 합계 ${decimalText(period.amount, 0)}원 · 같은 청구월의 합계", color = Muted, style = MaterialTheme.typography.bodySmall)
+                if (period.amount != null) Text("청구 합계 ${decimalText(period.amount, 0)}원", color = Muted, style = MaterialTheme.typography.bodySmall)
             }
+            if (index < data.periods.lastIndex) HorizontalDivider()
         }
         Text("실측 기록", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         if (data.observations.isEmpty()) EmptyNote("아직 실측 기록이 없어요", "검침 화면에서 계량기 숫자를 확인해 주세요.")

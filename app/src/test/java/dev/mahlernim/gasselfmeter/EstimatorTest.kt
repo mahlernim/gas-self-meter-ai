@@ -57,6 +57,21 @@ class EstimatorTest {
         assertThrows(IllegalStateException::class.java) { number("NaN") }
         assertThrows(IllegalStateException::class.java) { number("-0.1") }
     }
+    @Test fun historySummaryReturns24MonthsAndOnlyUnambiguousExactBillAmount() {
+        val periods = listOf(
+            UsagePeriod("2025-01-01", "2025-01-31", 31.0, billMonth = "202501", amount = 18_810.0),
+            UsagePeriod("2025-02-01", "2025-02-14", 14.0, billMonth = "202502", amount = 10_000.0),
+            UsagePeriod("2025-02-15", "2025-02-28", 28.0, billMonth = "202502", amount = 11_000.0),
+        )
+
+        val summary = HistorySummary.months(periods, YearMonth.of(2025, 3))
+
+        assertEquals(24, summary.size)
+        assertEquals(YearMonth.of(2023, 3), summary.first().month)
+        assertEquals(31.0, summary.single { it.month == YearMonth.of(2025, 1) }.usage!!, .00001)
+        assertEquals(18_810.0, summary.single { it.month == YearMonth.of(2025, 1) }.billedAmount!!, .00001)
+        assertNull(summary.single { it.month == YearMonth.of(2025, 2) }.billedAmount)
+    }
     @Test fun decayingCalibrationCannotMakeCumulativeMeterRunBackward() {
         val data = AppData(periods = history(), observations = listOf(
             Observation(time - 28 * 86_400_000L, 100.0, "manual"), Observation(time, 380.0, "manual")))

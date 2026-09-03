@@ -2,6 +2,7 @@ package dev.mahlernim.gasselfmeter
 
 import java.time.*
 import java.time.temporal.ChronoUnit
+import java.util.Locale
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.math.*
 
@@ -202,5 +203,28 @@ object Estimator {
         periods.forEach { it.validate() }
         val sorted = periods.sortedBy { it.start }
         sorted.zipWithNext().forEach { (a, b) -> require(a.last < b.first) { "사용 기간이 겹쳐요. 기존 이력의 날짜를 확인해 주세요." } }
+    }
+}
+
+data class MonthlyHistory(
+    val month: YearMonth,
+    val usage: Double?,
+    val billedAmount: Double?,
+)
+
+object HistorySummary {
+    fun months(periods: List<UsagePeriod>, latest: YearMonth, count: Int = 24): List<MonthlyHistory> {
+        require(count in 1..120)
+        return (count downTo 1).map { offset ->
+            val month = latest.minusMonths(offset.toLong())
+            val usage = Estimator.monthlyRate(periods, month)?.times(month.lengthOfMonth())
+            val billMonth = "%04d%02d".format(Locale.ROOT, month.year, month.monthValue)
+            val exactAmounts = periods.asSequence()
+                .filter { it.billMonth == billMonth }
+                .mapNotNull { it.amount }
+                .distinct()
+                .toList()
+            MonthlyHistory(month, usage, exactAmounts.singleOrNull())
+        }
     }
 }

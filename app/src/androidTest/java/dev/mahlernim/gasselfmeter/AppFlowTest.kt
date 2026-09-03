@@ -9,6 +9,7 @@ import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
 import java.io.File
+import java.time.YearMonth
 
 class AppFlowTest {
     @get:Rule val compose = createEmptyComposeRule()
@@ -53,6 +54,16 @@ class AppFlowTest {
             scenario.recreate()
             compose.onNodeWithText("기록", useUnmergedTree = true).performClick()
             compose.onNodeWithText("우리 집 사용 흐름").assertIsDisplayed()
+            compose.onNodeWithText("최근 24개월").assertIsDisplayed()
+            val latestMonth = HistorySummary.months(saved.periods, YearMonth.from(today())).last()
+            val latestDescription = buildString {
+                append("${latestMonth.month.year}년 ${latestMonth.month.monthValue}월, ")
+                append("사용량 ${decimalText(requireNotNull(latestMonth.usage))} 세제곱미터")
+                append(", 청구월 합계 ${decimalText(requireNotNull(latestMonth.billedAmount), 0)}원")
+            }
+            compose.onNodeWithContentDescription(latestDescription).performClick()
+            compose.onNodeWithText("${latestMonth.month.year}년 ${latestMonth.month.monthValue}월").assertIsDisplayed()
+            compose.onNodeWithText("가스비 ${decimalText(latestMonth.billedAmount!!, 0)}원 · 해당 청구월의 실제 합계").assertIsDisplayed()
             shot("04-history")
             assertEquals(saved, SecureStore(context).read())
             compose.onNodeWithText("설정", useUnmergedTree = true).performClick()
