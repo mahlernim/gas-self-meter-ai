@@ -1,6 +1,6 @@
 # Korean gas-provider integration research
 
-## 부산도시가스 검침값 입력
+## SK E&S 검침값 입력
 
 0.2.0은 단순 기록을 넘어 공급사의 자가검침 가능 기간과 기존 입력 상태를 확인하고, 계산한 누적 지침을 직접 또는 조건부로 자동 입력하도록 설계했습니다. 자동 입력은 기본적으로 꺼져 있으며 검침 기간 마지막 날에만 실행합니다.
 
@@ -49,7 +49,7 @@ The raw public probe script is [inspect_non_sk_public.py](../research/inspect_no
 
 The eight public login pages for Busan, Cowon, Chungcheong, Yeongnam Gumi, Yeongnam Pohang, Jeonnam, Gangwon and Jeonbuk Energy Service share the same normalized login function. Public caloric pages share a request shape. Both `www.skens.com` and `ebpp.skens.com` variants returned HTTP 200 during the audit.
 
-The Busan adapter uses `C000` as a company identifier. Changing only `/busan/` in the URL would leave contract identities, billing queries and caloric validation wrong for other companies. Each company needs its own verified code and authenticated response fixtures. Other SK companies therefore use the manual workflow in this release.
+The shared SK E&S adapter selects both the portal path and company identifier. The configured pairs are `busan`/`C000`, `koone`/`B000`, `cheongju`/`D000`, `gumi`/`E000`, `pohang`/`F000`, `jeonnam`/`G000`, `gangwon`/`J000` and `jeonbuk`/`K000`. These providers use the automatic account workflow and user-confirmed direct submission. Busan retains the existing opt-in background submission. The other regions rely on the verified common portal structure and keep background submission disabled until region-specific account fixtures are available.
 
 An authorized live account test through [ha-busan-city-gas](https://github.com/mahlernim/ha-busan-city-gas/tree/320513798301d491e3984fae8bb1a1cede22e8c0) succeeded for login, one contract, meter metadata and all 13 advertised billing months. The histories included dated usage segments and matching current-meter identity. Due dates were not extracted by that parser. No daily forecast-accuracy study was performed. No submission took place.
 

@@ -12,26 +12,26 @@ class ProviderAndBackupTest {
         <tr><td>기본료</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td>1100</td></tr></table></html>
     """.trimIndent()
     @Test fun billParserHandlesYearBoundaryMeterIdentityAndSeparatesUsageFromGrossAmount() {
-        val bill = BusanClient.parseBill(fixture(), "202501").single()
+        val bill = SkensClient.parseBill(fixture(), "202501").single()
         assertEquals("2024-12-20", bill.start)
         assertEquals("2025-01-19", bill.end)
         assertEquals(20.0, bill.usage, .00001)
         assertEquals(880.0, bill.unitCost!!, .00001)
-        assertEquals(BusanClient.opaque("synthetic-meter"), bill.meter)
+        assertEquals(SkensClient.opaque("synthetic-meter"), bill.meter)
         assertEquals(18810.0, bill.amount!!, .00001)
     }
     @Test fun changedPortalAndWrongBillingMonthFailClosed() {
-        assertEquals("2026-09-17", BusanClient.parsePortalDate("20260917"))
-        assertEquals("2026-09-17", BusanClient.parsePortalDate("2026.09.17"))
-        assertThrows(IllegalStateException::class.java) { BusanClient.parseBill(fixture(), "202502") }
-        assertThrows(IllegalStateException::class.java) { BusanClient.parseBill(fixture(current = "121"), "202501") }
-        assertThrows(IllegalStateException::class.java) { BusanClient.parseContracts("<input type='password'>") }
-        val contracts = BusanClient.parseContracts("<script>var data={BPNO:'1234'}</script><input id='list_cano_1' value='5678'><input id='list_bpname_1' value='synthetic'><input id='list_cano_2' value='9012'>")
+        assertEquals("2026-09-17", SkensClient.parsePortalDate("20260917"))
+        assertEquals("2026-09-17", SkensClient.parsePortalDate("2026.09.17"))
+        assertThrows(IllegalStateException::class.java) { SkensClient.parseBill(fixture(), "202502") }
+        assertThrows(IllegalStateException::class.java) { SkensClient.parseBill(fixture(current = "121"), "202501") }
+        assertThrows(IllegalStateException::class.java) { SkensClient.parseContracts("<input type='password'>") }
+        val contracts = SkensClient.parseContracts("<script>var data={BPNO:'1234'}</script><input id='list_cano_1' value='5678'><input id='list_bpname_1' value='synthetic'><input id='list_cano_2' value='9012'>")
         assertEquals(2, contracts.size)
         assertEquals("synthetic", contracts.first().name)
     }
     @Test fun portableBackupNeverContainsCredentialsAndImportIgnoresInjectedCredentials() {
-        val data = AppData(periods = BusanClient.parseBill(fixture(), "202501"), credentials = Credentials("synthetic-user", "synthetic-secret"), ready = true)
+        val data = AppData(periods = SkensClient.parseBill(fixture(), "202501"), credentials = Credentials("synthetic-user", "synthetic-secret"), ready = true)
         val exported = DataCodec.encode(data)
         assertFalse(exported.contains("synthetic-secret"))
         assertFalse(exported.contains("credentials"))
@@ -39,6 +39,15 @@ class ProviderAndBackupTest {
         assertNull(restored.credentials)
         assertEquals(data.periods, restored.periods)
         assertEquals(data.credentials, DataCodec.decode(DataCodec.encode(data, true), true).credentials)
+    }
+    @Test fun skensProviderConfigurationIsCompleteAndKeepsBusanContractKeysCompatible() {
+        val expected = mapOf("busan" to "C000", "koone" to "B000", "cheongju" to "D000", "gumi" to "E000",
+            "pohang" to "F000", "jeonnam" to "G000", "gangwon" to "J000", "jeonbuk" to "K000")
+        assertEquals(expected, Providers.all.filter { it.skens }.associate { it.id to it.skensCode })
+        assertTrue(expected.keys.all { Providers.get(it).automatic })
+        val contract = Contract("1234", "5678")
+        assertEquals(SkensClient.opaque("C000:1234:5678"), SkensClient.contractKey(Providers.skens("busan"), contract))
+        assertThrows(IllegalArgumentException::class.java) { Providers.skens("seoul") }
     }
     @Test fun unsupportedSchemaAndFutureObservationsCannotBeImported() {
         val data = AppData(observations = listOf(Observation(System.currentTimeMillis() + 86_400_000, 100.0, "manual")))

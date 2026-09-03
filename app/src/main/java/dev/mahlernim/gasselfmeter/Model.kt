@@ -66,7 +66,8 @@ object SubmissionPolicy {
         val settings = data.submissionSettings
         if (!settings.enabled) return SubmissionDecision(false, null, "검침값 입력 기능이 꺼져 있어요.")
         if (automatic && !settings.automatic) return SubmissionDecision(false, null, "마지막 날 자동 입력이 꺼져 있어요.")
-        if (data.profile.providerId != "busan" || data.profile.meter == "demo") return SubmissionDecision(false, null, "부산도시가스 연결 계정에서만 사용할 수 있어요.")
+        if (!Providers.get(data.profile.providerId).skens || data.profile.meter == "demo") return SubmissionDecision(false, null, "자동 연결한 SK E&S 공급사 계정에서만 사용할 수 있어요.")
+        if (automatic && !Providers.get(data.profile.providerId).automaticSubmission) return SubmissionDecision(false, null, "이 공급사는 직접 확인 입력만 지원해요.")
         if (automatic && data.credentials == null) return SubmissionDecision(false, null, "자동 입력에 필요한 로그인 정보가 저장되어 있지 않아요.")
         if (target == null) return SubmissionDecision(false, null, "먼저 공급사에서 검침 기간을 확인해 주세요.")
         if (!target.eligible) return SubmissionDecision(false, null, "이 계약은 자가검침 대상이 아니에요.")

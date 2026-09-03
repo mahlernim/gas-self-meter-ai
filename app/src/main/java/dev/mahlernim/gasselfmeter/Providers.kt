@@ -1,22 +1,35 @@
 package dev.mahlernim.gasselfmeter
 
-data class Provider(val id: String, val name: String, val regions: List<String>, val website: String, val automatic: Boolean = false, val gasapp: Boolean = false)
+data class Provider(
+    val id: String,
+    val name: String,
+    val regions: List<String>,
+    val website: String,
+    val automatic: Boolean = false,
+    val gasapp: Boolean = false,
+    val skensCode: String? = null,
+    val automaticSubmission: Boolean = false,
+) {
+    val skens: Boolean get() = skensCode != null
+    val accountRecovery: String get() = "https://www.skens.com/$id/login/find.do"
+    val registration: String get() = "https://www.skens.com/$id/join/type.do"
+}
 object Providers {
     val all = listOf(
-        Provider("busan", "부산도시가스", listOf("부산"), "https://www.skens.com/busan/login/login.do", true),
+        Provider("busan", "부산도시가스", listOf("부산"), "https://www.skens.com/busan/login/login.do", true, skensCode = "C000", automaticSubmission = true),
         Provider("seoul", "서울도시가스", listOf("서울", "경기"), "https://www.seoulgas.co.kr/", gasapp = true),
         Provider("yesco", "예스코", listOf("서울", "경기"), "https://www.lsyesco.com/", gasapp = true),
         Provider("samchully", "삼천리", listOf("경기", "인천"), "https://www.samchully.co.kr/"),
         Provider("incheon", "인천도시가스", listOf("인천", "경기"), "https://icgas.co.kr:8443/", gasapp = true),
         Provider("daeryun", "대륜E&S", listOf("서울", "경기"), "https://www.daeryunens.com/", gasapp = true),
         Provider("kiturami", "귀뚜라미에너지", listOf("서울"), "https://www.kituramienergy.co.kr/", gasapp = true),
-        Provider("koone", "코원에너지서비스", listOf("서울", "경기"), "https://www.skens.com/koone/login/login.do"),
-        Provider("cheongju", "충청에너지서비스", listOf("충북"), "https://www.skens.com/cheongju/login/login.do"),
-        Provider("gumi", "영남에너지서비스 구미", listOf("경북"), "https://www.skens.com/gumi/login/login.do"),
-        Provider("pohang", "영남에너지서비스 포항", listOf("경북"), "https://www.skens.com/pohang/login/login.do"),
-        Provider("jeonnam", "전남도시가스", listOf("전남"), "https://www.skens.com/jeonnam/login/login.do"),
-        Provider("gangwon", "강원도시가스", listOf("강원"), "https://www.skens.com/gangwon/login/login.do"),
-        Provider("jeonbuk", "전북에너지서비스", listOf("전북"), "https://www.skens.com/jeonbuk/login/login.do"),
+        Provider("koone", "코원에너지서비스", listOf("서울", "경기"), "https://www.skens.com/koone/login/login.do", true, skensCode = "B000"),
+        Provider("cheongju", "충청에너지서비스", listOf("충북"), "https://www.skens.com/cheongju/login/login.do", true, skensCode = "D000"),
+        Provider("gumi", "영남에너지서비스 구미", listOf("경북"), "https://www.skens.com/gumi/login/login.do", true, skensCode = "E000"),
+        Provider("pohang", "영남에너지서비스 포항", listOf("경북"), "https://www.skens.com/pohang/login/login.do", true, skensCode = "F000"),
+        Provider("jeonnam", "전남도시가스", listOf("전남"), "https://www.skens.com/jeonnam/login/login.do", true, skensCode = "G000"),
+        Provider("gangwon", "강원도시가스", listOf("강원"), "https://www.skens.com/gangwon/login/login.do", true, skensCode = "J000"),
+        Provider("jeonbuk", "전북에너지서비스", listOf("전북"), "https://www.skens.com/jeonbuk/login/login.do", true, skensCode = "K000"),
         Provider("jb", "JB", listOf("충남", "세종"), "https://www.jbcorporation.com/", gasapp = true),
         Provider("jeonbukgas", "전북도시가스", listOf("전북"), "https://www.jbcitygas.co.kr/", gasapp = true),
         Provider("gunsan", "군산도시가스", listOf("전북"), "https://www.kscg.co.kr/", gasapp = true),
@@ -29,4 +42,5 @@ object Providers {
     )
     val regions = listOf("부산", "서울", "경기", "인천", "울산", "경남", "대구", "경북", "대전", "세종", "충남", "충북", "광주", "전남", "전북", "강원", "제주")
     fun get(id: String) = all.firstOrNull { it.id == id } ?: all.last()
+    fun skens(id: String): Provider = get(id).also { require(it.skens) { "지원하지 않는 자동 연결 공급사예요." } }
 }

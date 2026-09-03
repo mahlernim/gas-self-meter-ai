@@ -23,7 +23,8 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
     var storageError by mutableStateOf(false); private set
     var contracts by mutableStateOf<List<Contract>>(emptyList()); private set
     var selfReadTarget by mutableStateOf<SelfReadTarget?>(null); private set
-    private var pendingClient: BusanClient? = null
+    private var pendingClient: SkensClient? = null
+    private var pendingProvider: Provider? = null
     private var pendingCredentials: Credentials? = null
     private var remember = true
     init {
@@ -80,19 +81,20 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
     }
     fun setSubmissionSettings(enabled: Boolean, automatic: Boolean, requireRecent: Boolean, recentDays: Int) = attempt {
         require(recentDays in 1..30)
-        val settings = SubmissionSettings(enabled, enabled && automatic, requireRecent, recentDays)
+        val settings = SubmissionSettings(enabled, enabled && automatic && Providers.get(data.profile.providerId).automaticSubmission, requireRecent, recentDays)
         save(data.copy(submissionSettings = settings))
         SubmissionScheduler.schedule(getApplication(), data)
     }
-    fun login(username: String, password: String, rememberPassword: Boolean) {
+    fun login(providerId: String, username: String, password: String, rememberPassword: Boolean) {
         if (busy) return
         if (username.isBlank() || password.isBlank()) { message = "아이디와 비밀번호를 입력해 주세요."; return }
         busy = true; loginError = null; setProgress(0, 5, "1단계 · 공급사에 안전하게 로그인하는 중"); remember = rememberPassword
         viewModelScope.launch {
             try {
                 pendingClient?.close()
+                pendingProvider = Providers.skens(providerId)
                 pendingCredentials = Credentials(username.trim(), password)
-                pendingClient = BusanClient(pendingCredentials!!)
+                pendingClient = SkensClient(pendingProvider!!, pendingCredentials!!)
                 val list = withContext(Dispatchers.IO) { pendingClient!!.login() }
                 contracts = list
                 setProgress(1, 5, "2단계 · 연결된 계약을 확인하는 중")
@@ -116,13 +118,14 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
             viewModelScope.launch { setProgress(state.completed, state.total, "4단계 · ${state.text}") }
         } }
         setProgress(5, 5, "5단계 · 가져온 기록을 안전하게 저장하는 중")
-        val contractKey = BusanClient.opaque("C000:${contract.bp}:${contract.ca}")
+        val provider = pendingProvider ?: error("연결할 공급사를 다시 선택해 주세요.")
+        val contractKey = SkensClient.contractKey(provider, contract)
         check(data.profile.contract.isBlank() || data.profile.contract == contractKey) { "다른 계약이에요. 현재 기록을 내보낸 후 데이터를 초기화해 주세요." }
         val newMonths = result.periods.map { it.billMonth }.toSet()
         val keep = data.periods.filter { old -> old.billMonth !in newMonths && result.periods.none { it.first <= old.last && old.first <= it.last } }
         val periods = (keep + result.periods).sortedBy { it.start }
         Estimator.validatePeriods(periods)
-        save(data.copy(profile = data.profile.copy(providerId = "busan", meter = result.meter, contract = contractKey, plannedDate = result.planned, syncTime = System.currentTimeMillis()),
+        save(data.copy(profile = data.profile.copy(providerId = provider.id, meter = result.meter, contract = contractKey, plannedDate = result.planned, syncTime = System.currentTimeMillis()),
             periods = periods, credentials = if (remember) pendingCredentials else null, ready = true))
         selfReadTarget = result.selfRead
         SubmissionScheduler.schedule(getApplication(), data)
@@ -137,8 +140,9 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 selfReadTarget = withContext(Dispatchers.IO) {
-                    BusanClient(credentials).use { client ->
-                        val contract = client.login().find { BusanClient.opaque("C000:${it.bp}:${it.ca}") == data.profile.contract }
+                    val provider = Providers.skens(data.profile.providerId)
+                    SkensClient(provider, credentials).use { client ->
+                        val contract = client.login().find { SkensClient.contractKey(provider, it) == data.profile.contract }
                             ?: error("저장된 계약을 찾지 못했어요. 공급사를 다시 연결해 주세요.")
                         viewModelScope.launch { setProgress(1, 3, "계약과 계량기를 확인하는 중") }
                         client.selfReadTarget(contract)
@@ -159,8 +163,9 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
                 withContext(Dispatchers.IO) {
                     SubmissionGate.lock.lock()
                     try {
-                        BusanClient(credentials).use { client ->
-                            val contract = client.login().find { BusanClient.opaque("C000:${it.bp}:${it.ca}") == data.profile.contract }
+                        val provider = Providers.skens(data.profile.providerId)
+                        SkensClient(provider, credentials).use { client ->
+                            val contract = client.login().find { SkensClient.contractKey(provider, it) == data.profile.contract }
                                 ?: error("저장된 계약을 찾지 못했어요. 공급사를 다시 연결해 주세요.")
                             val target = client.selfReadTarget(contract)
                             viewModelScope.launch { selfReadTarget = target; setProgress(1, 4, "입력 기간과 기존 제출 여부를 확인했어요") }
@@ -196,10 +201,10 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
         progressCurrent = current; progressTotal = total; progress = text
     }
     fun refresh() {
-        data.credentials?.let { login(it.username, it.password, true) } ?: run { message = "로그인 정보를 저장하지 않았어요. 설정에서 다시 연결해 주세요." }
+        data.credentials?.let { login(data.profile.providerId, it.username, it.password, true) } ?: run { message = "로그인 정보를 저장하지 않았어요. 설정에서 다시 연결해 주세요." }
     }
     fun cancelLogin() { if (!busy) clearPending() }
-    private fun clearPending() { pendingClient?.close(); pendingClient = null; pendingCredentials = null; contracts = emptyList() }
+    private fun clearPending() { pendingClient?.close(); pendingClient = null; pendingProvider = null; pendingCredentials = null; contracts = emptyList() }
     fun restore(raw: String) = attempt {
         check(!busy) { "조회가 끝난 뒤 다시 시도해 주세요." }
         val restored = DataCodec.decode(raw)
