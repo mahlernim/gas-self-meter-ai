@@ -4,9 +4,20 @@
 
 **일주일에 한 번, 우리 집 가스를 알아가요.**
 
-센서와 Home Assistant 없이 사용하는 Android 도시가스 기록 앱입니다. 작년 같은 달과 앞뒤 달의 사용 흐름에 최근 실제 계량기 확인값을 반영해 오늘의 누적 지침을 추정합니다.
+별도 센서나 서버 없이 사용하는 Android 도시가스 기록 앱입니다. 작년 같은 달과 앞뒤 달의 사용 흐름에 최근 실제 계량기 확인값을 반영해 오늘의 누적 지침을 추정합니다.
 
-[첫 APK 다운로드](https://github.com/mahlernim/gas-self-meter-ai/releases/latest) · [공급사 조사](docs/PROVIDERS.md) · [개인정보 안내](PRIVACY.md) · [추정 방법](docs/ESTIMATION.md)
+[Closed Alpha 참여](#closed-alpha-참여) · [공급사 조사](docs/PROVIDERS.md) · [개인정보 안내](PRIVACY.md) · [추정 방법](docs/ESTIMATION.md)
+
+## Closed Alpha 참여
+
+이 앱은 Google Play Closed Alpha 테스터에게만 배포합니다. GitHub에서 APK를 배포하지 않습니다.
+
+1. Play 스토어에서 사용할 Google 계정으로 [테스터 그룹](https://groups.google.com/g/gas-self-meter-ai)에 가입합니다.
+2. 같은 Google 계정으로 [Closed Alpha 참여 링크](https://play.google.com/apps/testing/dev.mahlernim.gasselfmeter)를 열고 테스터 등록을 완료합니다.
+3. 등록이 반영되면 Google Play에서 앱을 설치하거나 업데이트합니다.
+
+그룹 가입과 Play 테스터 등록은 별도 단계입니다. 설치 화면이 바로 보이지 않으면 두 단계에 같은 Google 계정을 사용했는지 확인한 뒤 잠시 후 다시 시도해 주세요.
+Closed Alpha 참여 링크는 앱 등록과 첫 테스트 출시가 완료된 뒤 활성화됩니다.
 
 ## 첫 버전에서 할 수 있는 일
 
@@ -77,4 +88,4 @@ Windows에서는 `gradlew.bat`를 사용합니다. `local.properties`에 `sdk.di
 
 ## 출처와 라이선스
 
-[mahlernim/ha-busan-city-gas](https://github.com/mahlernim/ha-busan-city-gas)의 MIT 라이선스 포털 구조를 Android로 옮겼습니다. 추정 모델은 이 앱의 주간 확인 흐름에 맞게 구현했습니다. 조사한 다른 프로젝트와 의존성 출처는 [NOTICE](NOTICE.md)에 기록했습니다. 앱 소스는 [MIT](LICENSE)입니다.
+조사한 제3자 프로젝트와 사용한 의존성의 출처는 [NOTICE](NOTICE.md)에 기록했습니다. 앱 소스는 [MIT](LICENSE)입니다.

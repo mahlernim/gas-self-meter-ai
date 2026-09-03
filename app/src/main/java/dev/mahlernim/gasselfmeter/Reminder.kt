@@ -37,11 +37,11 @@ class ReminderWorker(context: Context, params: WorkerParameters) : Worker(contex
         if (!data.ready || !data.profile.reminder) return Result.success()
         if (Build.VERSION.SDK_INT >= 33 && applicationContext.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return Result.success()
         val manager = applicationContext.getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(NotificationChannel(Reminders.CHANNEL, "일주일에 한 번 계량기 확인", NotificationManager.IMPORTANCE_DEFAULT))
+        manager.createNotificationChannel(NotificationChannel(Reminders.CHANNEL, "계량기 실측 확인 알림", NotificationManager.IMPORTANCE_DEFAULT))
         val pending = PendingIntent.getActivity(applicationContext, 1, Intent(applicationContext, MainActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         manager.notify(1, NotificationCompat.Builder(applicationContext, Reminders.CHANNEL)
             .setSmallIcon(R.drawable.ic_meter).setContentTitle("똑똑, 계량기를 확인할 시간이에요")
-            .setContentText("실제 숫자를 한 번 확인하면 이번 주 추정이 더 나아져요.")
+            .setContentText("계량기의 실제 숫자를 입력하면 이번 주 추정이 더 정확해져요.")
             .setContentIntent(pending).setAutoCancel(true).setVisibility(NotificationCompat.VISIBILITY_PRIVATE).build())
         return Result.success()
     }

@@ -33,6 +33,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -140,8 +141,7 @@ class MainActivity : ComponentActivity() {
         }
     }
     calibration?.let { initial -> CalibrationDialog(initial, estimate, data, { calibration = null }) { value ->
-        vm.calibrate(value)
-        if (vm.message?.startsWith("실제 확인값") == true) calibration = null
+        if (vm.calibrate(value)) calibration = null
     } }
     if (addHistory) HistoryDialog({ addHistory = false }) { start, end, value ->
         vm.addPeriod(start, end, value)
@@ -176,9 +176,30 @@ class MainActivity : ComponentActivity() {
             dismissButton = { TextButton(onClick = { restoreRaw = null }) { Text("취소") } })
     }
     if (licenses) {
-        val text = remember { listOf("NOTICE.md", "LICENSE.txt", "APACHE-2.0.txt", "JSOUP-LICENSE.txt").joinToString("\n\n") { name -> context.assets.open(name).bufferedReader().use { it.readText() } } }
+        val sections = remember {
+            listOf(
+                Triple("이 앱", "MIT 라이선스로 제공되는 앱 코드의 원문입니다.", "LICENSE.txt"),
+                Triple("AndroidX, Kotlin, OkHttp 등", "Apache License 2.0을 사용하는 주요 구성요소의 원문입니다.", "APACHE-2.0.txt"),
+                Triple("jsoup", "웹 문서 분석에 사용하는 jsoup의 MIT 라이선스 원문입니다.", "JSOUP-LICENSE.txt"),
+                Triple("저작권 및 구성요소 고지", "앱에 포함된 구성요소와 출처에 관한 상세 고지입니다.", "NOTICE.md")
+            ).map { (title, summary, asset) ->
+                Triple(title, summary, context.assets.open(asset).bufferedReader().use { it.readText().trim() })
+            }
+        }
         AlertDialog(onDismissRequest = { licenses = false }, title = { Text("오픈소스 라이선스") },
-            text = { Text(text, Modifier.verticalScroll(rememberScrollState()), style = MaterialTheme.typography.bodySmall) },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+                    Text("이 앱이 사용하는 오픈소스 구성요소와 라이선스 원문을 확인할 수 있어요.", color = Muted)
+                    sections.forEachIndexed { index, section ->
+                        if (index > 0) HorizontalDivider()
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(section.first, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                            Text(section.second, color = Muted, style = MaterialTheme.typography.bodySmall)
+                            Text(section.third, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+                        }
+                    }
+                }
+            },
             confirmButton = { TextButton(onClick = { licenses = false }) { Text("닫기") } })
     }
 }
@@ -398,7 +419,7 @@ class MainActivity : ComponentActivity() {
         Title("내 방식대로", "연결과 기록은 내가 관리해요.")
         SurfaceCard {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) { Text("일주일에 한 번 알림", fontWeight = FontWeight.Bold); Text("계량기를 볼 수 있는 시간으로", color = Muted, style = MaterialTheme.typography.bodySmall) }
+                Column(Modifier.weight(1f)) { Text("매주 계량기 실측 확인 알림", fontWeight = FontWeight.Bold); Text("계량기 숫자를 확인하고 입력할 시간을 알려드려요", color = Muted, style = MaterialTheme.typography.bodySmall) }
                 Switch(checked = data.profile.reminder, onCheckedChange = { if (it) enable() else disable() })
             }
             val days = listOf("월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일")
@@ -430,6 +451,8 @@ class MainActivity : ComponentActivity() {
         }
         Hint(Icons.Outlined.PrivacyTip, "공급사 로그인과 조회를 제외하면 모든 계산은 기기 안에서 이루어져요. 검침 제출, 광고, 사용자 추적 기능은 없어요.")
         TextButton(onClick = { open("https://github.com/mahlernim/gas-self-meter-ai") }) { Text("GitHub · 지원 범위와 개인정보 안내") }
+        TextButton(onClick = { open("https://groups.google.com/g/gas-self-meter-ai") }) { Text("테스터 그룹") }
+        TextButton(onClick = { open("https://github.com/mahlernim/gas-self-meter-ai/issues") }) { Text("오류 신고") }
         TextButton(onClick = licenses) { Text("오픈소스 라이선스") }
         Text("똑똑 자가검침 AI  ${BuildConfig.VERSION_NAME}\n독립적으로 만든 비공식 앱이에요.", color = Muted, style = MaterialTheme.typography.bodySmall)
     }

@@ -25,16 +25,17 @@ $env:GAS_SIGNING_STORE = $storePath
 $env:GAS_SIGNING_PASSWORD = $credential.Password
 try {
     Push-Location $projectRoot
-    & ./gradlew.bat :app:assembleRelease --console=plain
+    # A fresh process prevents a long-lived Gradle daemon from retaining stale signing environment values.
+    & ./gradlew.bat :app:bundleRelease --console=plain --no-daemon
     if ($LASTEXITCODE -ne 0) { throw 'Release build failed.' }
     $artifactDir = Join-Path $projectRoot 'artifacts'
     New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
-    $apkName = 'gas-self-meter-ai-0.1.0.apk'
-    $apk = Join-Path $artifactDir $apkName
-    Copy-Item -LiteralPath (Join-Path $projectRoot 'app/build/outputs/apk/release/app-release.apk') -Destination $apk
-    $digest = (Get-FileHash -LiteralPath $apk -Algorithm SHA256).Hash.ToLowerInvariant()
-    [System.IO.File]::WriteAllText((Join-Path $artifactDir 'SHA256SUMS.txt'), "$digest  $apkName`n")
-    Write-Output "Signed APK saved to $apk"
+    $bundleName = 'gas-self-meter-ai-0.1.0.aab'
+    $bundle = Join-Path $artifactDir $bundleName
+    Copy-Item -LiteralPath (Join-Path $projectRoot 'app/build/outputs/bundle/release/app-release.aab') -Destination $bundle
+    $digest = (Get-FileHash -LiteralPath $bundle -Algorithm SHA256).Hash.ToLowerInvariant()
+    [System.IO.File]::WriteAllText((Join-Path $artifactDir 'SHA256SUMS.txt'), "$digest  $bundleName`n")
+    Write-Output "Signed AAB saved to $bundle"
     Write-Output "Signing key retained at $storePath"
 } finally {
     Pop-Location

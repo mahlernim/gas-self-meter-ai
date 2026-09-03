@@ -13,7 +13,7 @@ import kotlin.math.abs
 data class Contract(val bp: String, val ca: String) { val label: String get() = "계약 ${ca.takeLast(4)}" }
 data class SyncResult(val periods: List<UsagePeriod>, val meter: String, val planned: String?, val warning: String?)
 
-/** Read-only port of the MIT-licensed ha-busan-city-gas protocol, with an explicit endpoint allowlist. */
+/** Independent read-only client with an explicit endpoint allowlist. */
 class BusanClient(private val credentials: Credentials) : AutoCloseable {
     private val cookies = mutableListOf<Cookie>()
     private val client = OkHttpClient.Builder().connectTimeout(20, TimeUnit.SECONDS)
