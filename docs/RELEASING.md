@@ -1,6 +1,6 @@
 # Build and Closed Alpha release
 
-The next test release uses application ID `dev.mahlernim.gasselfmeter`, version name `0.2.0`, and version code `3`. Supported devices run Android 8.0 or later. The build targets Android 16 / API 36. Distribution is limited to the Google Play Closed Alpha track. Do not attach an APK or AAB to a GitHub release.
+The next test release uses application ID `dev.mahlernim.gasselfmeter`, version name `0.2.1`, and version code `4`. Supported devices run Android 8.0 or later. The build targets Android 16 / API 36. Distribution is limited to the Google Play Closed Alpha track. Do not attach an APK or AAB to a GitHub release.
 
 The project uses AGP 9.2.0, its built-in Kotlin support, Kotlin Compose compiler 2.3.10, Gradle 9.4.1, and JDK 21. Dependency versions are explicit in the Gradle build file.
 
@@ -16,7 +16,7 @@ Set `JAVA_HOME` and `ANDROID_HOME` or an ignored `local.properties` file. Instal
 
 The release build reads `GAS_SIGNING_STORE` and `GAS_SIGNING_PASSWORD`. Use the `gas-self-meter-ai` keystore alias. Keep the keystore and password outside the repository, back them up privately and never publish either signing secret. The signing key must remain stable so Google Play can accept future updates.
 
-The signing script passes the password through environment variables so it does not appear as a command-line argument. It generates `artifacts/gas-self-meter-ai-0.2.0.aab`. Upload this AAB only to the app's Closed Alpha track in Google Play Console. Do not distribute it from GitHub or another public download page.
+The signing script passes the password through environment variables so it does not appear as a command-line argument. It generates `artifacts/gas-self-meter-ai-0.2.1.aab`. Upload this AAB only to the app's Closed Alpha track in Google Play Console. Do not distribute it from GitHub or another public download page.
 
 Before every upload, increment `versionCode`. Update `versionName` when the tester-visible release version should change. Debug signing is not used for Play uploads.
 
@@ -46,4 +46,4 @@ Group membership alone does not opt a user into the test. Each tester must open 
 
 ## Authorized live testing
 
-Normal CI and instrumentation tests use only synthetic data. The research Python probe prompts for authorized credentials using hidden input. No credential is committed, passed as a process argument, or written to its output. Before the first 0.2.0 upload, use an authorized account during its actual reading window to verify one exact value. Confirm the contract, meter, period and value immediately before the single request. Never exercise automatic submission for this first live check, and never retry an uncertain response without reconciling the provider state.
+Normal CI and instrumentation tests use only synthetic data. The research Python probe prompts for authorized credentials using hidden input. No credential is committed, passed as a process argument, or written to its output. Before treating submission as production-verified, use an authorized account during its actual reading window to verify one exact value. Confirm the contract, meter, period and value immediately before the single request. Never exercise automatic submission for this first live check, and never retry an uncertain response without reconciling the provider state. Closed Alpha testers must be told that submission remains unverified and is off by default.

@@ -30,7 +30,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Release build failed.' }
     $artifactDir = Join-Path $projectRoot 'artifacts'
     New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
-    $bundleName = 'gas-self-meter-ai-0.2.0.aab'
+    $bundleName = 'gas-self-meter-ai-0.2.1.aab'
     $bundle = Join-Path $artifactDir $bundleName
     Copy-Item -LiteralPath (Join-Path $projectRoot 'app/build/outputs/bundle/release/app-release.aab') -Destination $bundle
     $digest = (Get-FileHash -LiteralPath $bundle -Algorithm SHA256).Hash.ToLowerInvariant()
