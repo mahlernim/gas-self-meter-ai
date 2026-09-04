@@ -1,5 +1,8 @@
 package dev.mahlernim.gasselfmeter
 
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.ui.semantics.Role
+
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
@@ -110,7 +113,7 @@ fun GasappConnectScreen(
                     OutlinedButton(onClick = { run { terms = withContext(Dispatchers.IO) { api.terms(carrier) } } }, enabled = !busy) { Text("필수 약관 확인") }
                 } else {
                     terms.forEach { document -> TextButton(onClick = { shownTerms = document }) { Text(document.category) } }
-                    Row { Checkbox(checked = accepted, onCheckedChange = { accepted = it }, enabled = !busy); Text("필수 약관에 동의합니다.") }
+                    Row(Modifier.fillMaxWidth().toggleable(value = accepted, enabled = !busy, role = Role.Checkbox, onValueChange = { accepted = it }), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) { Checkbox(checked = accepted, onCheckedChange = null, enabled = !busy); Text("필수 약관에 동의합니다.") }
                     Text("선택적 혜택 정보 수신에는 동의하지 않습니다.", style = MaterialTheme.typography.bodySmall)
                 }
                 Button(onClick = { run {
