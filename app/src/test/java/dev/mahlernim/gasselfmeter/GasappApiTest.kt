@@ -95,6 +95,14 @@ class GasappApiTest {
         assertEquals(1, server.requestCount)
     }
 
+    @Test fun replacementFlagChangingAfterConfirmationBlocksPost() = withApi { server, api ->
+        server.enqueue(response(JSONObject(targetJson).put("meterChange", JSONObject().put("changeYn", "Y")).toString()))
+        assertThrows(IllegalArgumentException::class.java) {
+            api.submit(session, GasappApi.parseTarget(JSONObject(targetJson), account), 36.0, LocalDate.of(2026, 9, 18))
+        }
+        assertEquals(1, server.requestCount)
+    }
+
     @Test fun lostPostResponseReconcilesWithoutSecondPost() = withApi { server, api ->
         server.enqueue(response(targetJson))
         server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST))

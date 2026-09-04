@@ -259,7 +259,8 @@ class GasappApi internal constructor(
         }
 
         fun sameTarget(a: GasappTarget, b: GasappTarget) = a.account.key == b.account.key && a.meter != null && a.meter == b.meter &&
-            a.start != null && a.end != null && a.start == b.start && a.end == b.end && a.previous == b.previous
+            a.start != null && a.end != null && a.start == b.start && a.end == b.end && a.previous == b.previous &&
+            a.meterChanged == b.meterChanged
 
         private fun checkAccount(account: GasappAccount) {
             require(account.company in companyProviders) { "가스앱 회사 코드를 확인해 주세요." }
