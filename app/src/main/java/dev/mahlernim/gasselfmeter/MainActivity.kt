@@ -198,8 +198,8 @@ class MainActivity : ComponentActivity() {
         text = { Text("${Providers.get(data.profile.providerId).name}에 로그인해 청구 이력, 계량기 정보, 검침 기간과 제출 상태를 갱신합니다.\n\n정보는 하루 한 번 자동으로 갱신중입니다. 새 청구서나 변경 사항을 지금 확인하려면 실행해주세요.") },
         confirmButton = { TextButton(onClick = { refreshConfirmation = false; vm.refresh() }) { Text("갱신 실행") } },
         dismissButton = { TextButton(onClick = { refreshConfirmation = false }) { Text("취소") } })
-    calibration?.let { initial -> CalibrationDialog(initial, estimate, data, { calibration = null }) { value ->
-        if (vm.calibrate(value)) calibration = null
+    calibration?.let { initial -> CalibrationDialog(initial, estimate, vm.busy, { calibration = null }) { value, result ->
+        vm.calibrate(value) { error -> result(error); if (error == null) calibration = null }
     } }
     submitValue?.let { value ->
         val provider = Providers.get(data.profile.providerId)
@@ -211,9 +211,8 @@ class MainActivity : ComponentActivity() {
             confirmButton = { TextButton(onClick = { vm.submitReading(value); submitValue = null }) { Text("$valueText m³ 입력") } },
             dismissButton = { TextButton(onClick = { submitValue = null }) { Text("취소") } })
     }
-    if (addHistory) HistoryDialog({ addHistory = false }) { start, end, value ->
-        vm.addPeriod(start, end, value)
-        if (vm.message == "사용 이력을 저장했어요.") addHistory = false
+    if (addHistory) HistoryDialog(vm.busy, { addHistory = false }) { start, end, value, result ->
+        vm.addPeriod(start, end, value) { error -> result(error); if (error == null) addHistory = false }
     }
     loginProviderId?.let { providerId ->
         if (Providers.get(providerId).gasapp) {
@@ -230,23 +229,32 @@ class MainActivity : ComponentActivity() {
             { u, p, remember -> vm.login(providerId, u, p, remember) }, { vm.selectContract(it) }, ::open, { diagnostics = true })
     }
     LaunchedEffect(data.profile.syncTime) { if (data.profile.syncTime != null && vm.contracts.isEmpty()) loginProviderId = null }
-    LaunchedEffect(vm.busy) { if (!vm.busy && data.ready && data.profile.syncTime != null && vm.contracts.isEmpty() && vm.message?.contains("개월") == true) loginProviderId = null }
     confirmation?.let { action ->
+        var actionError by remember(action) { mutableStateOf<String?>(null) }
         val title = when { action == "erase" -> "기기의 모든 기록을 지울까요?"; action == "meter" -> "새 계량기로 시작할까요?"; else -> "이 기록을 삭제할까요?" }
         val text = when (action) {
             "erase" -> "로그인 정보, 사용 이력, 확인 기록과 알림 설정을 지워요. 필요한 기록은 먼저 내보내 주세요."
             "meter" -> "이전 실측은 보관하고 새 계량기의 숫자로 다시 시작해요. 작년 사용 이력은 계절 추정에 계속 활용해요."
             else -> "삭제한 기록은 추정에 사용하지 않아요."
         }
-        AlertDialog(onDismissRequest = { confirmation = null }, title = { Text(title) }, text = { Text(text) },
+        AlertDialog(onDismissRequest = { if (!vm.busy) confirmation = null }, title = { Text(title) }, text = { Column {
+            Text(text)
+            actionError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        } },
             confirmButton = { TextButton(onClick = {
+                if (action == "meter") {
+                    vm.resetMeter { error ->
+                        actionError = error
+                        if (error == null) { tab = 0; confirmation = null }
+                    }
+                    return@TextButton
+                }
                 when {
                     action == "erase" -> { vm.erase(); tab = 0 }
-                    action == "meter" -> { vm.resetMeter(); tab = 1 }
                     action.startsWith("period:") -> data.periods.getOrNull(action.substringAfter(":").toInt())?.let(vm::deletePeriod)
                     action.startsWith("observation:") -> data.observations.find { it.time == action.substringAfter(":").toLong() }?.let(vm::deleteObservation)
                 }; confirmation = null
-            }) { Text(if (action == "meter") "새로 시작" else "삭제") } }, dismissButton = { TextButton(onClick = { confirmation = null }) { Text("취소") } })
+            }, enabled = !vm.busy) { Text(if (action == "meter") "새로 시작" else "삭제") } }, dismissButton = { TextButton(onClick = { confirmation = null }, enabled = !vm.busy) { Text("취소") } })
     }
     restoreRaw?.let { raw ->
         val preview = remember(raw) { DataCodec.decode(raw) }
@@ -460,6 +468,21 @@ class MainActivity : ComponentActivity() {
         }
         return
     }
+    val demo = data.profile.meter == "demo"
+    val supported = provider.skens || provider.gasapp
+    val connected = if (provider.gasapp) data.gasappConnection != null else data.credentials != null
+    if (!demo && (!supported || !connected)) {
+        val context = LocalContext.current
+        Page {
+            Title(if (supported) "공급사 연결이 필요해요" else "앱에서 제출을 지원하지 않아요")
+            Text(if (supported) "설정의 다시 연결에서 계정을 연결하고 로그인 정보를 저장해 주세요. 연결 전에는 앱에서 조회·제출·제출 알림을 실행하지 않아요."
+                else "${provider.name}는 사용량과 실측을 직접 기록할 수 있어요. 검침값 제출은 공식 고객센터를 이용해 주세요.")
+            ActionButton("공급사 홈페이지", Icons.Outlined.OpenInNew) {
+                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(provider.website)))
+            }
+        }
+        return
+    }
     val gasappTarget = data.cachedGasappTarget
     val decision = if (provider.gasapp) GasappSubmissionPolicy.decide(data, gasappTarget, now, automatic = false)
         else SubmissionPolicy.decide(data, target, now, automatic = false)
@@ -468,7 +491,6 @@ class MainActivity : ComponentActivity() {
     val periodEnd = if (provider.gasapp) gasappTarget?.end else target?.end
     val submitted = if (provider.gasapp) gasappTarget?.submitted == true else target?.submitted == true
     val submittedValue = if (provider.gasapp) gasappTarget?.submittedValue else target?.submittedValue
-    val demo = data.profile.meter == "demo"
     val demoDate = dateOf(now)
     val demoValue = Estimator.estimate(data, now).reading?.let { kotlin.math.round(it * 10.0) / 10.0 }
     Page {
@@ -743,10 +765,10 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@Composable private fun CalibrationDialog(initial: String, estimate: Estimate, data: AppData, close: () -> Unit, save: (String) -> Unit) {
+@Composable private fun CalibrationDialog(initial: String, estimate: Estimate, busy: Boolean, close: () -> Unit, save: (String, (String?) -> Unit) -> Unit) {
     var value by remember { mutableStateOf(initial.replace(",", "")) }
     var error by remember { mutableStateOf<String?>(null) }
-    AlertDialog(onDismissRequest = close, title = { Text("계량기를 보고 확인했나요?") },
+    AlertDialog(onDismissRequest = { if (!busy) close() }, title = { Text("계량기를 보고 확인했나요?") },
         text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Text("지금 계량기의 누적 숫자와 맞춰 주세요. 확인한 값은 오늘의 실제 기록으로 저장해요.")
             OutlinedTextField(value, { value = it; error = null }, label = { Text("실제 계량기 숫자") }, suffix = { Text("m³") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true, modifier = Modifier.fillMaxWidth(), isError = error != null)
@@ -758,17 +780,17 @@ class MainActivity : ComponentActivity() {
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             Text("여기서는 실측값만 저장해요. 공급사 입력은 제출 탭에서 값과 기간을 다시 확인한 뒤 진행합니다.", style = MaterialTheme.typography.bodySmall, color = Muted)
         } },
-        confirmButton = { TextButton(onClick = { try { Estimator.addObservation(data, number(value)); save(value) } catch (e: Exception) { error = readableError(e) } }) { Text("이 숫자로 확인") } },
-        dismissButton = { TextButton(onClick = close) { Text("나중에") } })
+        confirmButton = { TextButton(onClick = { save(value) { error = it } }, enabled = !busy) { Text("이 숫자로 확인") } },
+        dismissButton = { TextButton(onClick = close, enabled = !busy) { Text("나중에") } })
 }
 
-@Composable private fun HistoryDialog(close: () -> Unit, save: (String, String, String) -> Unit) {
+@Composable private fun HistoryDialog(busy: Boolean, close: () -> Unit, save: (String, String, String, (String?) -> Unit) -> Unit) {
     val month = YearMonth.from(today()).minusYears(1)
     var start by remember { mutableStateOf(month.atDay(1).toString()) }
     var end by remember { mutableStateOf(month.atEndOfMonth().toString()) }
     var usage by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
-    AlertDialog(onDismissRequest = close, title = { Text("과거 사용량 추가") },
+    AlertDialog(onDismissRequest = { if (!busy) close() }, title = { Text("과거 사용량 추가") },
         text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("청구서의 사용 기간과 보정 전 사용량(m³)을 입력해 주세요. 지침이 있다면 당월 지침에서 전월 지침을 빼면 돼요.")
             OutlinedTextField(start, { start = it }, label = { Text("사용 시작일 YYYY-MM-DD") }, singleLine = true)
@@ -776,10 +798,8 @@ class MainActivity : ComponentActivity() {
             OutlinedTextField(usage, { usage = it }, label = { Text("기간 사용량") }, suffix = { Text("m³") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
             Text("달 전체 사용량만 알고 있다면 해당 월 1일부터 마지막 날까지 입력해 주세요.", color = Muted, style = MaterialTheme.typography.bodySmall)
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        } }, confirmButton = { TextButton(onClick = { try {
-            UsagePeriod(LocalDate.parse(start).toString(), LocalDate.parse(end).toString(), number(usage)).validate(); save(start, end, usage)
-        } catch (_: Exception) { error = "날짜와 사용량을 확인해 주세요. 종료일은 오늘 이후일 수 없어요." } }) { Text("저장") } },
-        dismissButton = { TextButton(onClick = close) { Text("취소") } })
+        } }, confirmButton = { TextButton(onClick = { save(start, end, usage) { error = it } }, enabled = !busy) { Text("저장") } },
+        dismissButton = { TextButton(onClick = close, enabled = !busy) { Text("취소") } })
 }
 
 @Composable private fun LoginDialog(provider: Provider, busy: Boolean, progress: String, progressCurrent: Int, progressTotal: Int, contracts: List<Contract>, error: String?, close: () -> Unit,

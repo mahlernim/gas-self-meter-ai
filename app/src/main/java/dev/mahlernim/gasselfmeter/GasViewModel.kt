@@ -5,6 +5,7 @@ import androidx.compose.runtime.*
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
@@ -30,14 +31,31 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
     private var pendingCredentials: Credentials? = null
     private var remember = true
     init {
-        try { data = store.read() } catch (_: Exception) { storageError = true; message = "저장 데이터를 열지 못했어요. 원본은 보존되어 있어요. 백업을 가져오거나 데이터를 초기화할 수 있어요." }
+        busy = true
+        setProgress(0, 1, "저장한 기록을 여는 중")
+        viewModelScope.launch {
+            try {
+                publish(withContext(Dispatchers.IO) { store.read() })
+                scheduleStoredData()
+            }
+            catch (e: CancellationException) { throw e }
+            catch (_: Exception) { storageError = true; message = "저장 데이터를 열지 못했어요. 원본은 보존되어 있어요. 백업을 가져오거나 데이터를 초기화할 수 있어요." }
+            finally { busy = false }
+            if (!storageError) refreshIfDue()
+        }
     }
-    private fun save(next: AppData) {
+    private fun publish(next: AppData) { data = next; selfReadTarget = next.cachedSelfRead }
+    private suspend fun save(next: AppData) {
         check(!storageError) { "저장 파일을 먼저 복구하거나 초기화해 주세요." }
         val before = data
-        data = store.update { latest ->
+        val saved = withContext(Dispatchers.IO) { store.update { latest ->
+            check(latest.profile.providerId == before.profile.providerId && latest.profile.contract == before.profile.contract) { "계정 정보가 변경되었어요. 현재 연결을 다시 확인해 주세요." }
             if (next.observations != before.observations) check(latest.profile.meter == before.profile.meter) { "계량기 정보가 변경되었어요. 현재 계량기를 다시 확인해 주세요." }
             next.copy(
+            observations = if (next.observations == before.observations) latest.observations else next.observations,
+            credentials = if (next.credentials == before.credentials) latest.credentials else next.credentials,
+            gasappConnection = if (next.gasappConnection == before.gasappConnection) latest.gasappConnection else next.gasappConnection,
+            submissionSettings = if (next.submissionSettings == before.submissionSettings) latest.submissionSettings else next.submissionSettings,
             profile = next.profile.copy(
                 meter = if (next.profile.meter == before.profile.meter) latest.profile.meter else next.profile.meter,
                 plannedDate = if (next.profile.plannedDate == before.profile.plannedDate) latest.profile.plannedDate else next.profile.plannedDate,
@@ -50,48 +68,53 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
             samchullyBills = if (next.samchullyBills == before.samchullyBills) latest.samchullyBills else next.samchullyBills,
             cachedGasappTarget = if (next.cachedGasappTarget == before.cachedGasappTarget) latest.cachedGasappTarget else next.cachedGasappTarget,
             gasappMeterChangeObservedAt = if (next.gasappMeterChangeObservedAt == before.gasappMeterChangeObservedAt) latest.gasappMeterChangeObservedAt else next.gasappMeterChangeObservedAt)
-        }
-        selfReadTarget = data.cachedSelfRead
+        } }
+        publish(saved)
     }
-    fun attempt(action: () -> Unit) { try { action() } catch (e: Exception) { message = reportError(e) } }
+    /** Gate immediately on Main, do synchronous disk transactions on IO, publish only after commit. */
+    fun attempt(onResult: (String?) -> Unit = {}, action: suspend () -> Unit) {
+        if (busy) {
+            val error = "진행 중인 작업이 끝난 뒤 다시 시도해 주세요."
+            message = error; onResult(error); return
+        }
+        busy = true
+        setProgress(0, 1, "기록을 처리하는 중")
+        viewModelScope.launch {
+            var error: String? = null
+            try { action() }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { error = reportError(e); message = error }
+            finally { busy = false }
+            onResult(error)
+        }
+    }
     fun manual(provider: String) = attempt {
         save(data.copy(profile = data.profile.copy(providerId = provider), ready = true))
     }
-    fun calibrate(reading: String): Boolean {
-        return try {
-            check(!busy) { "조회가 끝난 뒤 다시 시도해 주세요." }
+    fun calibrate(reading: String, onResult: (String?) -> Unit = {}) = attempt(onResult) {
             save(Estimator.addObservation(data, number(reading)))
             Reminders.schedule(getApplication(), data.profile)
             message = "실제 확인값을 저장했어요. 화면과 다음 추정에 반영했어요."
-            true
-        } catch (e: Exception) {
-            message = reportError(e)
-            false
-        }
     }
-    fun addPeriod(start: String, end: String, usage: String) = attempt {
-        check(!busy) { "조회가 끝난 뒤 다시 시도해 주세요." }
+    fun addPeriod(start: String, end: String, usage: String, onResult: (String?) -> Unit = {}) = attempt(onResult) {
         val period = UsagePeriod(LocalDate.parse(start).toString(), LocalDate.parse(end).toString(), number(usage))
         val next = data.periods + period
         Estimator.validatePeriods(next)
         save(data.copy(periods = next.sortedBy { it.start }))
         message = "사용 이력을 저장했어요."
     }
-    fun deletePeriod(period: UsagePeriod) = attempt { check(!busy); save(data.copy(periods = data.periods - period)) }
-    fun deleteObservation(observation: Observation) = attempt { check(!busy); save(data.copy(observations = data.observations - observation)) }
-    fun resetMeter() = attempt {
-        check(!busy) { "조회가 끝난 뒤 다시 시도해 주세요." }
+    fun deletePeriod(period: UsagePeriod) = attempt { save(data.copy(periods = data.periods - period)) }
+    fun deleteObservation(observation: Observation) = attempt { save(data.copy(observations = data.observations - observation)) }
+    fun resetMeter(onResult: (String?) -> Unit = {}) = attempt(onResult) {
         save(data.copy(profile = data.profile.copy(meter = "manual-${UUID.randomUUID()}", plannedDate = null)))
         message = "새 계량기로 시작해요. 현재 숫자를 확인해 주세요."
     }
     fun changeProvider() = attempt {
-        check(!busy)
         save(data.copy(ready = false, credentials = null, submissionSettings = SubmissionSettings(), cachedSelfRead = null, gasappConnection = null, cachedGasappTarget = null))
         SubmissionScheduler.schedule(getApplication(), data)
         ProviderRefresh.schedule(getApplication(), data)
     }
     fun forgetCredentials() = attempt {
-        check(!busy)
         save(data.copy(credentials = null, gasappConnection = null, submissionSettings = data.submissionSettings.copy(automatic = false)))
         SubmissionScheduler.schedule(getApplication(), data)
         ProviderRefresh.schedule(getApplication(), data)
@@ -114,7 +137,7 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
     }
     fun login(providerId: String, username: String, password: String, rememberPassword: Boolean) {
         if (busy) return
-        if (username.isBlank() || password.isBlank()) { message = "아이디와 비밀번호를 입력해 주세요."; return }
+        if (username.isBlank() || password.isBlank()) { loginError = "아이디와 비밀번호를 입력해 주세요."; message = loginError; return }
         if (Providers.get(providerId).experimentalReadOnly) {
             loginSamchully(username, password, rememberPassword)
             return
@@ -269,34 +292,46 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
                         }
                     } finally { SubmissionGate.lock.unlock() }
                 }
-                data = store.read()
+                publish(withContext(Dispatchers.IO) { store.read() })
                 if (data.submissions.lastOrNull()?.status == "confirmed") getApplication<Application>().getSystemService(android.app.NotificationManager::class.java).cancel(3)
                 setProgress(4, 4, "검침값 입력 결과를 확인했어요")
                 message = data.submissions.lastOrNull()?.detail ?: "검침값 입력을 마쳤어요."
             } catch (e: Exception) {
-                record?.let { attempt ->
-                    store.update { BackgroundState.finish(it, reviewed, attempt.copy(status = "uncertain", detail = "전송 결과를 확정하지 못했어요. 자동 재전송하지 않습니다.")) }
+                if (e is CancellationException) throw e
+                try {
+                    publish(withContext(Dispatchers.IO) {
+                        record?.let { attempt ->
+                            store.update { BackgroundState.finish(it, reviewed, attempt.copy(status = "uncertain", detail = "전송 결과를 확정하지 못했어요. 자동 재전송하지 않습니다.")) }
+                        } ?: store.read()
+                    })
+                } catch (recovery: Exception) {
+                    if (recovery is CancellationException) throw recovery
+                    storageError = true
+                    message = "전송 결과와 저장 상태를 확인하지 못했어요. 재전송하지 말고 공급사 홈페이지에서 확인해 주세요.\n" + reportError(recovery, "submit")
+                    return@launch
                 }
-                data = store.read()
                 message = record?.let { "전송 결과를 확정하지 못했어요. 공급사 홈페이지에서 확인해 주세요." } ?: reportError(e)
             } finally { busy = false }
         }
     }
-    private fun replaceSubmission(record: SubmissionRecord) {
-        if (record.status == "confirmed") getApplication<Application>().getSystemService(android.app.NotificationManager::class.java).cancel(3)
-        save(data.copy(submissions = (data.submissions.filterNot { it.cycle == record.cycle } + record).takeLast(100)))
-    }
     private fun setProgress(current: Int, total: Int, text: String) {
         progressCurrent = current; progressTotal = total; progress = text
     }
-    fun onForeground() = attempt {
-        if (busy || storageError) return@attempt
-        data = store.read()
-        selfReadTarget = data.cachedSelfRead
+    fun onForeground() {
+        if (busy || storageError) return
+        attempt(onResult = { error -> if (error == null) refreshIfDue() }) {
+            publish(withContext(Dispatchers.IO) { store.read() })
+            scheduleStoredData()
+        }
+    }
+    private fun scheduleStoredData() {
         ProviderRefresh.schedule(getApplication(), data)
         SubmissionScheduler.schedule(getApplication(), data)
         Reminders.schedule(getApplication(), data.profile)
-        if ((data.credentials != null || data.gasappConnection != null) && (data.profile.syncTime == null || System.currentTimeMillis() - data.profile.syncTime!! >= 86_400_000L)) refresh(false)
+    }
+    private fun refreshIfDue() {
+        if ((data.credentials != null || data.gasappConnection != null) &&
+            (data.profile.syncTime == null || System.currentTimeMillis() - data.profile.syncTime!! >= 86_400_000L)) refresh(false)
     }
     fun refresh() = refresh(true)
     private fun refresh(force: Boolean) {
@@ -339,22 +374,30 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
             } finally { busy = false }
         }
     }
-    private fun reportError(e: Exception, stage: String = "sync"): String =
-        readableError(e) + "\n" + Diagnostics.record(getApplication(), pendingProvider?.id ?: data.profile.providerId, stage, e)
+    private suspend fun reportError(e: Exception, stage: String = "sync"): String {
+        val provider = pendingProvider?.id ?: data.profile.providerId
+        return readableError(e) + "\n" + withContext(Dispatchers.IO) { Diagnostics.record(getApplication(), provider, stage, e) }
+    }
     private fun clearPending() { pendingClient?.close(); pendingClient = null; pendingSamchully = null; pendingProvider = null; pendingCredentials = null; contracts = emptyList() }
-    fun restore(raw: String) = attempt {
-        check(!busy) { "조회가 끝난 뒤 다시 시도해 주세요." }
-        val restored = DataCodec.decode(raw)
-        store.write(restored.copy(ready = true))
-        storageError = false; data = restored.copy(ready = true)
+    fun restore(raw: String, onResult: (String?) -> Unit = {}) = attempt(onResult) {
+        restoreData(withContext(Dispatchers.IO) { DataCodec.decode(raw) })
+    }
+    fun restore(restored: AppData, onResult: (String?) -> Unit = {}) = attempt(onResult) { restoreData(restored) }
+    private suspend fun restoreData(restored: AppData) {
+        // Serialize replacement with provider mutations without suspending inside the thread-owned lock.
+        val next = restored.copy(ready = true)
+        withContext(Dispatchers.IO) { SubmissionGate.lock.withLock { store.write(next) } }
+        storageError = false; publish(next)
         Reminders.schedule(getApplication(), data.profile)
         SubmissionScheduler.schedule(getApplication(), data)
         ProviderRefresh.schedule(getApplication(), data)
         message = "기록을 복원했어요. 로그인 정보와 알림 설정은 다시 연결해 주세요."
     }
     fun erase() = attempt {
-        check(!busy) { "조회가 끝난 뒤 다시 시도해 주세요." }
-        clearPending(); Reminders.schedule(getApplication(), Profile()); SubmissionScheduler.schedule(getApplication(), AppData()); store.erase(); Diagnostics.clear(getApplication()); data = AppData(); selfReadTarget = null; storageError = false
+        clearPending()
+        withContext(Dispatchers.IO) { SubmissionGate.lock.withLock { store.erase(); Diagnostics.clear(getApplication()) } }
+        publish(AppData()); storageError = false
+        Reminders.schedule(getApplication(), data.profile); SubmissionScheduler.schedule(getApplication(), data)
         ProviderRefresh.schedule(getApplication(), data)
         message = "기기에 저장된 데이터를 모두 지웠어요."
     }
