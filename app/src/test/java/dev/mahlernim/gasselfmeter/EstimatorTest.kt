@@ -4,6 +4,7 @@ import org.junit.Assert.*
 import org.junit.Test
 import java.time.LocalDate
 import java.time.YearMonth
+import kotlin.math.abs
 
 class EstimatorTest {
     private val date = today().minusDays(2)
@@ -71,6 +72,74 @@ class EstimatorTest {
         assertEquals(31.0, summary.single { it.month == YearMonth.of(2025, 1) }.usage!!, .00001)
         assertEquals(18_810.0, summary.single { it.month == YearMonth.of(2025, 1) }.billedAmount!!, .00001)
         assertNull(summary.single { it.month == YearMonth.of(2025, 2) }.billedAmount)
+    }
+    @Test fun medianPairwiseSlopeIgnoresASingleMisreadCheck() {
+        val day = 86_400_000L
+        // A true two cubic metres a day, with the third check mistyped as 170.
+        val points = listOf(
+            Observation(time - 21 * day, 100.0, "manual"),
+            Observation(time - 14 * day, 114.0, "manual"),
+            Observation(time - 7 * day, 170.0, "manual"),
+            Observation(time, 142.0, "manual"),
+        )
+
+        assertEquals(2.0, Estimator.robustDailyRate(points)!!, .00001)
+        assertNull(Estimator.robustDailyRate(points.take(1)))
+    }
+    @Test fun misreadCheckNoLongerLeavesTheForecastWithoutARate() {
+        val day = 86_400_000L
+        val data = AppData(observations = listOf(
+            Observation(time - 21 * day, 100.0, "manual"),
+            Observation(time - 14 * day, 114.0, "manual"),
+            Observation(time - 7 * day, 170.0, "manual"),
+            Observation(time, 142.0, "manual"),
+        ))
+
+        // The trailing pair alone falls backward and used to yield no rate at all.
+        val result = Estimator.estimate(data, time + day)
+
+        assertEquals(2.0, result.daily!!, .00001)
+        assertEquals(144.0, result.reading!!, .00001)
+    }
+    @Test fun storedForecastErrorBecomesABiasAndStaysBounded() {
+        val day = 86_400_000L
+        val data = AppData(observations = listOf(
+            Observation(time - 40 * day, 100.0, "manual"),
+            Observation(time, 120.0, "manual", predicted = 110.0),
+        ))
+
+        // Forecast ten, actual twenty, so the ratio is two and the clamp keeps it there.
+        assertEquals(2.0, Estimator.calibrationBias(data)!!, .00001)
+        assertNull(Estimator.calibrationBias(AppData(observations = listOf(Observation(time, 120.0, "manual")))))
+    }
+    @Test fun learnedBiasCorrectsTheSeasonalOnlyPathAndKeepsTheMeterRising() {
+        val day = 86_400_000L
+        val data = AppData(periods = history(), observations = listOf(
+            Observation(time - 40 * day, 100.0, "manual"),
+            Observation(time, 260.0, "manual", predicted = 180.0),
+        ))
+
+        // Only one check sits inside the trailing window, so there is no in-window ratio and the
+        // learned bias of two doubles the two cubic metre seasonal rate.
+        val result = Estimator.estimate(data, time + day)
+
+        assertEquals(4.0, result.daily!!, .00001)
+        assertEquals(264.0, result.reading!!, .00001)
+        val readings = (0L..20L).map { Estimator.estimate(data, time + it * day, time).reading!! }
+        readings.zipWithNext().forEach { (a, b) -> assertTrue("Corrected rate must stay non-negative", b >= a) }
+    }
+    @Test fun recentSlopeFadesOutWithoutSteppingAtTheFourteenDayHorizon() {
+        val day = 86_400_000L
+        // A seasonal rate this small keeps the prior interval under the ratio threshold, which is
+        // what routes the estimate through the blended branch this test covers.
+        val data = AppData(periods = history(.005), observations = listOf(
+            Observation(time - day, 100.0, "manual"), Observation(time, 100.5, "manual")))
+
+        val daily = (12L..16L).map { Estimator.estimate(data, time + it * day).daily!! }
+
+        assertEquals(.005, daily[2], .0000001)
+        assertEquals("The blend must reach the seasonal rate continuously", daily[2], daily[3], .0000001)
+        daily.zipWithNext().forEach { (a, b) -> assertTrue("Daily rate must not step", abs(a - b) < .005) }
     }
     @Test fun decayingCalibrationCannotMakeCumulativeMeterRunBackward() {
         val data = AppData(periods = history(), observations = listOf(
