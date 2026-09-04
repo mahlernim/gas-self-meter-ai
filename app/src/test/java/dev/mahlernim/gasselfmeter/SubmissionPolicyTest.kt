@@ -25,6 +25,26 @@ class SubmissionPolicyTest {
         ready = true
     )
 
+    @Test fun manualSubmissionDoesNotRequireRemovedFeatureToggle() {
+        val original = data()
+        assertTrue(SubmissionPolicy.decide(original.copy(submissionSettings = original.submissionSettings.copy(enabled = false)), target, time, automatic = false).allowed)
+    }
+    @Test fun newReminderPreferencesRoundTripAndLegacyDefaultsMigrate() {
+        val original = data().copy(profile = data().profile.copy(reminderRepeatCount = 6, customerNumber = "123"),
+            submissionSettings = data().submissionSettings.copy(reminder = true, reminderHour = 21, reminderMinute = 35), cachedSelfRead = target)
+        val restored = DataCodec.decode(DataCodec.encode(original, true), true)
+        assertEquals(original, restored)
+        val backup = DataCodec.decode(DataCodec.encode(original))
+        assertNull(backup.cachedSelfRead)
+        assertFalse(backup.submissionSettings.reminder)
+        val legacy = org.json.JSONObject(DataCodec.encode(data(), true)).apply {
+            put("schema", 2)
+            getJSONObject("profile").remove("reminderRepeatCount")
+            getJSONObject("submissionSettings").remove("reminder")
+        }
+        assertEquals(3, DataCodec.decode(legacy.toString(), true).profile.reminderRepeatCount)
+    }
+
     @Test fun automaticSubmissionRequiresLastDayAndRecentPhysicalCheck() {
         val allowed = SubmissionPolicy.decide(data(), target, time, automatic = true)
         assertTrue(allowed.allowed)

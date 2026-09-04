@@ -52,7 +52,7 @@ class ProviderAndBackupTest {
     @Test fun unsupportedSchemaAndFutureObservationsCannotBeImported() {
         val data = AppData(observations = listOf(Observation(System.currentTimeMillis() + 86_400_000, 100.0, "manual")))
         assertThrows(IllegalArgumentException::class.java) { DataCodec.decode(DataCodec.encode(data)) }
-        assertThrows(IllegalArgumentException::class.java) { DataCodec.decode(DataCodec.encode(AppData()).replace("\"schema\": 2", "\"schema\": 9")) }
+        assertThrows(IllegalArgumentException::class.java) { DataCodec.decode(JSONObject(DataCodec.encode(AppData())).put("schema", 99).toString()) }
     }
     @Test fun versionOneStateMigratesWithSubmissionDisabled() {
         val legacy = JSONObject(DataCodec.encode(AppData(ready = true))).apply {

@@ -20,10 +20,10 @@ class ManualAndBackupFlowTest {
         if (android.os.Build.VERSION.SDK_INT >= 33) device.executeShellCommand("pm grant dev.mahlernim.gasselfmeter android.permission.POST_NOTIFICATIONS")
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             compose.onNodeWithText("로그인 없이 직접 시작").performScrollTo().performClick()
-            compose.onNodeWithText("계량기 보고 확인하기").performClick()
+            compose.onNodeWithText("계량기 보고 보정하기").performClick()
             compose.onNodeWithText("실제 계량기 숫자").performTextInput("1000.0")
             compose.onNodeWithText("이 숫자로 확인").performClick()
-            compose.onNodeWithText("기록", useUnmergedTree = true).performClick()
+            compose.onNodeWithText("추이", useUnmergedTree = true).performClick()
             compose.onNodeWithText("과거 사용량 추가").performClick()
             compose.onNodeWithText("기간 사용량").performTextInput("30")
             compose.onNodeWithText("저장", useUnmergedTree = true).performClick()
@@ -34,12 +34,14 @@ class ManualAndBackupFlowTest {
             compose.onNode(isToggleable()).performClick()
             compose.waitUntil(5000) { SecureStore(context).read().profile.reminder }
             val workManager = androidx.work.WorkManager.getInstance(context)
-            val scheduled = workManager.getWorkInfosForUniqueWork("weekly-meter-check").get(5, java.util.concurrent.TimeUnit.SECONDS)
+            val scheduled = workManager.getWorkInfosForUniqueWork("calibration-daily-check").get(5, java.util.concurrent.TimeUnit.SECONDS)
             assertTrue(scheduled.any { it.state == androidx.work.WorkInfo.State.ENQUEUED })
-            // Exercise the same worker now without waiting a week or changing the device clock.
-            workManager.enqueue(androidx.work.OneTimeWorkRequestBuilder<ReminderWorker>().build()).result.get(5, java.util.concurrent.TimeUnit.SECONDS)
+            // A fresh calibration suppresses the weekly reminder and its follow-ups.
+            val reminderWork = androidx.work.OneTimeWorkRequestBuilder<ReminderWorker>().build()
+            workManager.enqueue(reminderWork).result.get(5, java.util.concurrent.TimeUnit.SECONDS)
+            compose.waitUntil(10_000) { workManager.getWorkInfoById(reminderWork.id).get()?.state == androidx.work.WorkInfo.State.SUCCEEDED }
             val notifications = context.getSystemService(android.app.NotificationManager::class.java)
-            compose.waitUntil(10_000) { notifications.activeNotifications.any { it.id == 1 } }
+            assertFalse(notifications.activeNotifications.any { it.id == 1 })
             compose.onNodeWithText("기록 내보내기").performScrollTo().performClick()
             compose.waitForIdle()
             device.waitForIdle()
