@@ -138,17 +138,78 @@ object Estimator {
         return if (covered >= minOf(14, month.lengthOfMonth())) sum / covered else null
     }
 
-    fun seasonalRate(periods: List<UsagePeriod>, date: LocalDate): Double? {
+    fun seasonalRate(periods: List<UsagePeriod>, date: LocalDate): Double? =
+        seasonalRate(date) { monthlyRate(periods, it) }
+
+    // Read through a rate provider so one estimate can reuse a month's average instead of
+    // rescanning every imported period for each of the days it integrates.
+    private fun seasonalRate(date: LocalDate, rateOf: (YearMonth) -> Double?): Double? {
         val lastYear = date.minusYears(1)
         val month = YearMonth.from(lastYear)
         val center = month.atDay(15)
-        val rate = monthlyRate(periods, month) ?: return null
+        val rate = rateOf(month) ?: return null
         val neighborMonth = if (lastYear < center) month.minusMonths(1) else month.plusMonths(1)
-        val neighbor = monthlyRate(periods, neighborMonth) ?: return rate
+        val neighbor = rateOf(neighborMonth) ?: return rate
         val distance = abs(ChronoUnit.DAYS.between(center, neighborMonth.atDay(15))).toDouble()
         val weight = abs(ChronoUnit.DAYS.between(center, lastYear)) / distance
         return rate * (1 - weight) + neighbor * weight
     }
+
+    /** Median pairwise slope. One misread check cannot dominate the way a two-point slope lets it. */
+    internal fun robustDailyRate(points: List<Observation>): Double? {
+        if (points.size < 2) return null
+        val slopes = ArrayList<Double>(points.size * (points.size - 1) / 2)
+        for (start in points.indices) {
+            for (end in start + 1 until points.size) {
+                val days = (points[end].time - points[start].time) / 86_400_000.0
+                if (days > 0) slopes += (points[end].reading - points[start].reading) / days
+            }
+        }
+        if (slopes.isEmpty()) return null
+        slopes.sort()
+        val middle = slopes.size / 2
+        val median = if (slopes.size % 2 == 1) slopes[middle] else (slopes[middle - 1] + slopes[middle]) / 2.0
+        return median.coerceAtLeast(0.0)
+    }
+
+    /**
+     * Exponentially weighted mean of log(actual / forecast) over recent checks.
+     *
+     * Each check already stores the forecast it landed against, so this reuses evidence the app
+     * recorded and then discarded. Returns null until at least one check can be compared, and the
+     * result stays positive so a corrected rate can never run a cumulative meter backward.
+     */
+    internal fun calibrationBias(data: AppData, until: Long = Long.MAX_VALUE): Double? {
+        val observations = data.observations
+            .filter { it.meter == data.profile.meter && it.time <= until }
+            .sortedBy { it.time }
+        var weightedSum = 0.0
+        var weightTotal = 0.0
+        var weight = 1.0
+        var samples = 0
+        for (index in observations.indices.reversed()) {
+            if (samples >= CALIBRATION_SAMPLES) break
+            val observation = observations[index]
+            val predicted = observation.predicted ?: continue
+            val base = anchors(data.copy(observations = observations.take(index)), observation.time).lastOrNull() ?: continue
+            val forecast = predicted - base.reading
+            val actual = observation.reading - base.reading
+            // A near-zero interval carries no usable ratio and would swamp the mean.
+            if (forecast < CALIBRATION_MINIMUM_USAGE || actual < CALIBRATION_MINIMUM_USAGE) continue
+            weightedSum += weight * ln(actual / forecast)
+            weightTotal += weight
+            weight *= CALIBRATION_DECAY
+            samples += 1
+        }
+        if (weightTotal <= 0.0) return null
+        return exp(weightedSum / weightTotal).coerceIn(CALIBRATION_MINIMUM, CALIBRATION_MAXIMUM)
+    }
+
+    private const val CALIBRATION_SAMPLES = 12
+    private const val CALIBRATION_DECAY = 0.7
+    private const val CALIBRATION_MINIMUM_USAGE = 0.5
+    private const val CALIBRATION_MINIMUM = 0.5
+    private const val CALIBRATION_MAXIMUM = 2.0
 
     private fun integrate(start: Long, end: Long, rate: (LocalDate) -> Double?): Double? {
         if (end < start || end - start > 370L * 86_400_000) return null
@@ -169,25 +230,44 @@ object Estimator {
         val anchor = anchors.lastOrNull() ?: return Estimate(null, null, "첫 계량기 확인이 필요해요", null, null)
         val age = ((time - anchor.time) / 86_400_000).coerceAtLeast(0)
         if (age > 60) return Estimate(null, null, "확인한 지 60일이 지났어요", age, anchor.time)
+        val monthly = HashMap<YearMonth, Double?>()
+        fun seasonalAt(date: LocalDate): Double? = seasonalRate(date) { month ->
+            if (!monthly.containsKey(month)) monthly[month] = monthlyRate(data.periods, month)
+            monthly[month]
+        }
         val physical = data.observations.filter { it.meter == data.profile.meter && it.time <= evidenceUntil && it.time <= time }.sortedBy { it.time }
         val last = physical.lastOrNull()
-        val first = if (last == null) null else physical.lastOrNull { it.time <= last.time - 86_400_000 && it.time >= last.time - 28L * 86_400_000 }
+        // Every check in the trailing window contributes and the earliest one anchors the span, so a
+        // longer record counts as more evidence instead of being discarded for the most recent pair.
+        val window = if (last == null) emptyList() else physical.filter {
+            it.time <= last.time - 86_400_000 && it.time >= last.time - 28L * 86_400_000
+        } + last
+        val first = window.firstOrNull()?.takeIf { window.size >= 2 }
         val span = if (first != null && last != null) (last.time - first.time) / 86_400_000.0 else 0.0
-        val recent = if (span > 0 && last!!.reading >= first!!.reading) (last.reading - first.reading) / span else null
+        val recent = robustDailyRate(window)
+        val evidence = span / (span + 7.0)
         val daysSince = if (last != null) (time - last.time) / 86_400_000.0 else Double.POSITIVE_INFINITY
-        val priorInterval = if (first != null && last != null) integrate(first.time, last.time) { seasonalRate(data.periods, it) } else null
-        val weight = (span / (span + 7.0)) * (1.0 - daysSince / 28.0).coerceIn(0.0, 1.0)
+        val priorInterval = if (first != null && last != null) integrate(first.time, last.time) { seasonalAt(it) } else null
         val ratio = if (priorInterval != null && priorInterval > .01 && recent != null) ((last!!.reading - first!!.reading) / priorInterval).coerceIn(0.0, 5.0) else null
+        // The in-window ratio already corrects the same seasonal shape, so the learned bias applies
+        // only where that ratio could not be formed. Otherwise one deviation would be counted twice.
+        val bias = if (ratio == null) calibrationBias(data, minOf(time, evidenceUntil)) else null
+        val labelWeight = evidence * (1.0 - daysSince / 28.0).coerceIn(0.0, 1.0)
         fun rate(date: LocalDate): Double? {
-            val seasonal = seasonalRate(data.periods, date)
+            val seasonal = seasonalAt(date)
             // Decay on each integrated date, not on the forecast's end date. Otherwise
             // revising the entire elapsed interval can make a cumulative meter run backward.
             val dateAge = if (last != null) ((dayStart(date) - last.time) / 86_400_000.0).coerceAtLeast(0.0) else Double.POSITIVE_INFINITY
-            val dateWeight = (span / (span + 7.0)) * (1.0 - dateAge / 28.0).coerceIn(0.0, 1.0)
             if (seasonal != null) {
-                if (ratio != null) return seasonal * (1.0 + dateWeight * (ratio - 1.0))
-                if (recent != null && dateAge <= 14) return seasonal * (1 - dateWeight) + recent * dateWeight
-                return seasonal
+                if (ratio != null) {
+                    return seasonal * (1.0 + evidence * (1.0 - dateAge / 28.0).coerceIn(0.0, 1.0) * (ratio - 1.0))
+                }
+                val corrected = seasonal * (bias ?: 1.0)
+                // Ramp the recent slope to zero at the same fourteen-day horizon the no-history path
+                // uses. The blend used to stop at a step, which moved the daily rate on its own.
+                val blend = evidence * (1.0 - dateAge / 14.0).coerceIn(0.0, 1.0)
+                if (recent != null && blend > 0.0) return corrected * (1 - blend) + recent * blend
+                return corrected
             }
             return recent?.takeIf { daysSince <= 14 }
         }
@@ -196,8 +276,9 @@ object Estimator {
         val source = when {
             increment == null -> "작년 이력 또는 두 번의 실측이 필요해요"
             daily == null -> "확인한 계량기 숫자"
-            seasonalRate(data.periods, dateOf(time)) == null -> "최근 실측 기준 · 계절 정보 없음"
-            recent != null && weight > 0 -> "작년 계절 흐름 + 최근 실측 보정"
+            seasonalAt(dateOf(time)) == null -> "최근 실측 기준 · 계절 정보 없음"
+            recent != null && labelWeight > 0 -> "작년 계절 흐름 + 최근 실측 보정"
+            bias != null -> "작년 계절 흐름 + 지난 확인 보정"
             else -> "작년 계절 흐름 기준"
         }
         return Estimate(increment?.let { anchor.reading + it }, daily, source, age, anchor.time)
