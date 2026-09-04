@@ -30,7 +30,7 @@ class AlphaConnectionFlowTest {
             compose.awaitStorage(scenario)
             compose.onNodeWithText("부산").performScrollTo().performClick()
             compose.onNodeWithText("경기").performClick()
-            compose.onNodeWithText("서울도시가스").performScrollTo().performClick()
+            compose.onNodeWithText("공급사를 선택해 주세요").performScrollTo().performClick()
             compose.onNodeWithText("삼천리").performClick()
             compose.onNodeWithText("삼천리 연결하기").performScrollTo().performClick()
 
@@ -65,16 +65,19 @@ class AlphaConnectionFlowTest {
             compose.onNodeWithText("진단 기록").performScrollTo().performClick()
             compose.onNode(hasText("진단 기록") and hasAnyAncestor(isDialog())).assertIsDisplayed()
             compose.onNodeWithText("서버로 자동 전송하지 않습니다.").performScrollTo().assertIsDisplayed()
+            compose.waitUntil(5_000) { compose.onAllNodesWithText(expectedReport).fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText(expectedReport).performScrollTo().assertIsDisplayed()
             compose.onNodeWithText(secret, substring = true).assertDoesNotExist()
             compose.onNodeWithText("복사").assertIsEnabled()
             compose.onNodeWithText("기록 지우기").performClick()
+            compose.waitUntil(5_000) { compose.onAllNodesWithText("저장된 진단 기록이 없어요.").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("저장된 진단 기록이 없어요.").assertIsDisplayed()
             assertFalse(Diagnostics.report(context).contains("|samchully|"))
             compose.onNodeWithText("닫기").performClick()
 
             // Reopening reads the persisted deletion, not merely a cleared dialog state.
             compose.onNodeWithText("진단 기록").performScrollTo().performClick()
+            compose.waitUntil(5_000) { compose.onAllNodesWithText("저장된 진단 기록이 없어요.").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("저장된 진단 기록이 없어요.").assertIsDisplayed()
             compose.onNodeWithText("닫기").performClick()
         }

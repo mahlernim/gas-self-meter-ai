@@ -18,6 +18,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -38,6 +39,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -52,6 +56,10 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
@@ -108,11 +116,12 @@ class MainActivity : ComponentActivity() {
     var addHistory by remember { mutableStateOf(false) }
     var loginProviderId by remember { mutableStateOf<String?>(null) }
     var confirmation by remember { mutableStateOf<String?>(null) }
-    var restoreRaw by remember { mutableStateOf<String?>(null) }
+    var restorePreview by remember { mutableStateOf<AppData?>(null) }
     var licenses by remember { mutableStateOf(false) }
     var diagnostics by remember { mutableStateOf(false) }
     var refreshConfirmation by remember { mutableStateOf(false) }
     var notificationPurpose by remember { mutableStateOf("calibration") }
+    var pendingSubmissionSettings by remember { mutableStateOf<SubmissionSettings?>(null) }
     var submitValue by remember { mutableStateOf<Double?>(null) }
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) { while (true) { now = System.currentTimeMillis(); delay(30_000) } }
@@ -121,19 +130,26 @@ class MainActivity : ComponentActivity() {
     val estimate = remember(data, now) { Estimator.estimate(data, now) }
     val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri != null) vm.attempt {
-            context.contentResolver.openOutputStream(uri)?.use { it.write(DataCodec.encode(vm.data).toByteArray(Charsets.UTF_8)) } ?: error("파일을 열지 못했어요.")
+            val snapshot = vm.data
+            withContext(Dispatchers.IO) {
+                context.contentResolver.openOutputStream(uri)?.use { it.write(DataCodec.encode(snapshot).toByteArray(Charsets.UTF_8)) } ?: error("파일을 열지 못했어요.")
+            }
             vm.message = "기록을 내보냈어요. 로그인 정보는 포함하지 않았어요."
         }
     }
     val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) vm.attempt {
-            val raw = context.contentResolver.openInputStream(uri)?.use { String(it.readBytesLimited(2_000_000), Charsets.UTF_8) } ?: error("파일을 열지 못했어요.")
-            DataCodec.decode(raw)
-            restoreRaw = raw
+            restorePreview = withContext(Dispatchers.IO) {
+                val raw = context.contentResolver.openInputStream(uri)?.use { String(it.readBytesLimited(2_000_000), Charsets.UTF_8) } ?: error("파일을 열지 못했어요.")
+                DataCodec.decode(raw)
+            }
         }
     }
     val notification = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (notificationPurpose == "submission") vm.setSubmissionSettings(vm.data.submissionSettings.copy(reminder = granted))
+        if (notificationPurpose == "submission") {
+            vm.setSubmissionSettings((pendingSubmissionSettings ?: vm.data.submissionSettings).copy(reminder = granted))
+            pendingSubmissionSettings = null
+        }
         else vm.setReminder(granted, vm.data.profile.reminderDay, vm.data.profile.reminderHour)
         if (!granted) vm.message = "알림 권한이 꺼져 있어요. 기기 설정에서 허용할 수 있어요."
     }
@@ -173,9 +189,10 @@ class MainActivity : ComponentActivity() {
                     (context.getSystemService(ClipboardManager::class.java)).setPrimaryClip(ClipData.newPlainText("계약자번호", data.profile.customerNumber))
                     vm.message = "계약자번호 복사됨"
                 }, vm.busy)
-                1 -> SubmissionPage(data, vm.selfReadTarget, now, vm.busy, vm::checkSubmissionStatus, { value -> submitValue = value }, { settings ->
-                    if (settings.reminder && !data.submissionSettings.reminder && Build.VERSION.SDK_INT >= 33) {
-                        vm.setSubmissionSettings(settings.copy(reminder = false))
+                1 -> SubmissionPage(data, vm.selfReadTarget, now, estimate, vm.busy, vm::checkSubmissionStatus, { value -> submitValue = value }, { settings ->
+                    if (!vm.busy && settings.reminder && !data.submissionSettings.reminder && Build.VERSION.SDK_INT >= 33 &&
+                        context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                        pendingSubmissionSettings = settings
                         notificationPurpose = "submission"
                         notification.launch(Manifest.permission.POST_NOTIFICATIONS)
                     } else vm.setSubmissionSettings(settings)
@@ -256,28 +273,31 @@ class MainActivity : ComponentActivity() {
                 }; confirmation = null
             }, enabled = !vm.busy) { Text(if (action == "meter") "새로 시작" else "삭제") } }, dismissButton = { TextButton(onClick = { confirmation = null }, enabled = !vm.busy) { Text("취소") } })
     }
-    restoreRaw?.let { raw ->
-        val preview = remember(raw) { DataCodec.decode(raw) }
-        AlertDialog(onDismissRequest = { restoreRaw = null }, title = { Text("백업 기록으로 바꿀까요?") },
-            text = { Text("사용 이력 ${preview.periods.size}개와 확인 기록 ${preview.observations.size}개를 가져와요. 현재 기록은 대체되며 로그인 정보는 가져오지 않아요.") },
-            confirmButton = { TextButton(onClick = { vm.restore(raw); restoreRaw = null; tab = 0 }) { Text("복원") } },
-            dismissButton = { TextButton(onClick = { restoreRaw = null }) { Text("취소") } })
+    restorePreview?.let { preview ->
+        var error by remember(preview) { mutableStateOf<String?>(null) }
+        AlertDialog(onDismissRequest = { if (!vm.busy) restorePreview = null }, title = { Text("백업 기록으로 바꿀까요?") },
+            text = { Column { Text("사용 이력 ${preview.periods.size}개와 확인 기록 ${preview.observations.size}개를 가져와요. 현재 기록은 대체되며 로그인 정보는 가져오지 않아요."); error?.let { Text(it, color = MaterialTheme.colorScheme.error) } } },
+            confirmButton = { TextButton(enabled = !vm.busy, onClick = { vm.restore(preview) { result -> error = result; if (result == null) { restorePreview = null; tab = 0 } } }) { Text("복원") } },
+            dismissButton = { TextButton(enabled = !vm.busy, onClick = { restorePreview = null }) { Text("취소") } })
     }
     if (licenses) {
-        val sections = remember {
-            listOf(
+        var sections by remember { mutableStateOf<List<Triple<String, String, String>>>(emptyList()) }
+        var loadError by remember { mutableStateOf<String?>(null) }
+        LaunchedEffect(Unit) {
+            try { sections = withContext(Dispatchers.IO) { listOf(
                 Triple("이 앱", "MIT 라이선스로 제공되는 앱 코드의 원문입니다.", "LICENSE.txt"),
                 Triple("AndroidX, Kotlin, OkHttp 등", "Apache License 2.0을 사용하는 주요 구성요소의 원문입니다.", "APACHE-2.0.txt"),
                 Triple("jsoup", "웹 문서 분석에 사용하는 jsoup의 MIT 라이선스 원문입니다.", "JSOUP-LICENSE.txt"),
                 Triple("저작권 및 구성요소 고지", "앱에 포함된 구성요소와 출처에 관한 상세 고지입니다.", "NOTICE.md")
             ).map { (title, summary, asset) ->
                 Triple(title, summary, context.assets.open(asset).bufferedReader().use { it.readText().trim() })
-            }
+            } } } catch (e: Exception) { if (e is CancellationException) throw e; loadError = "라이선스를 읽지 못했어요. 다시 열어 주세요." }
         }
         AlertDialog(onDismissRequest = { licenses = false }, title = { Text("오픈소스 라이선스") },
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(18.dp)) {
                     Text("이 앱이 사용하는 오픈소스 구성요소와 라이선스 원문을 확인할 수 있어요.", color = Muted)
+                    if (sections.isEmpty()) Text(loadError ?: "라이선스를 읽는 중이에요.")
                     sections.forEachIndexed { index, section ->
                         if (index > 0) HorizontalDivider()
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -291,19 +311,29 @@ class MainActivity : ComponentActivity() {
             confirmButton = { TextButton(onClick = { licenses = false }) { Text("닫기") } })
     }
     if (diagnostics) {
-        var report by remember { mutableStateOf(Diagnostics.report(context)) }
-        AlertDialog(onDismissRequest = { diagnostics = false }, title = { Text("진단 기록") },
+        var report by remember { mutableStateOf<String?>(null) }
+        var diagnosticBusy by remember { mutableStateOf(true) }
+        val diagnosticScope = rememberCoroutineScope()
+        LaunchedEffect(Unit) { report = withContext(Dispatchers.IO) { Diagnostics.report(context) }; diagnosticBusy = false }
+        AlertDialog(onDismissRequest = { if (!diagnosticBusy) diagnostics = false }, title = { Text("진단 기록") },
             text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("서버로 자동 전송하지 않습니다.")
                 Text("계정·비밀번호·청구 내용은 제외하며 오류 단계와 코드만 기기에 최대 100건 보관해요. 복사한 내용을 확인하고 오류 신고에 붙여 주세요.", style = MaterialTheme.typography.bodySmall)
-                Text(report, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
-                TextButton(onClick = { vm.attempt { Diagnostics.clear(context); report = Diagnostics.report(context) } }) { Text("기록 지우기") }
+                Text(report ?: "진단 기록을 읽는 중이에요.", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+                TextButton(enabled = !diagnosticBusy, onClick = {
+                    diagnosticBusy = true
+                    diagnosticScope.launch {
+                        try { report = withContext(Dispatchers.IO) { Diagnostics.clear(context); Diagnostics.report(context) } }
+                        catch (e: Exception) { if (e is CancellationException) throw e; report = readableError(e) }
+                        finally { diagnosticBusy = false }
+                    }
+                }) { Text("기록 지우기") }
             } },
-            confirmButton = { TextButton(onClick = {
+            confirmButton = { TextButton(enabled = !diagnosticBusy && report != null, onClick = {
                 context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("진단 기록", report))
                 vm.message = "진단 기록을 복사했어요. 내용을 확인한 뒤 오류 신고에 붙여 주세요."
             }) { Text("복사") } },
-            dismissButton = { TextButton(onClick = { diagnostics = false }) { Text("닫기") } })
+            dismissButton = { TextButton(enabled = !diagnosticBusy, onClick = { diagnostics = false }) { Text("닫기") } })
     }
 }
 
@@ -349,12 +379,15 @@ class MainActivity : ComponentActivity() {
         SurfaceCard {
             Text("어디에 살고 계신가요?", fontWeight = FontWeight.Bold, fontSize = 18.sp)
             Choice("지역", region, Providers.regions) { value ->
-                region = value; providerId = Providers.all.firstOrNull { value in it.regions }?.id ?: "other"
+                region = value
+                if (Providers.all.none { it.id == providerId && (value in it.regions || it.id == "other") }) providerId = ""
             }
             val providers = Providers.all.filter { region in it.regions || it.id == "other" }
-            Choice("도시가스 공급사", Providers.get(providerId).name, providers.map { it.name }) { name -> providerId = providers.first { it.name == name }.id }
-            val provider = Providers.get(providerId)
-            if (provider.automatic) {
+            val provider = providers.find { it.id == providerId }
+            Choice("도시가스 공급사", provider?.name ?: "공급사를 선택해 주세요", providers.map { it.name }) { name -> providerId = providers.first { it.name == name }.id }
+            if (provider == null) {
+                Text("청구서에 적힌 공급사를 선택해 주세요. 같은 지역에서도 주소에 따라 공급사가 달라요.", color = Muted)
+            } else if (provider.automatic) {
                 if (provider.experimentalReadOnly) Text("실험적 조회 연결 · 아직 계정별 검증 중이며 검침 제출은 지원하지 않아요.", color = Muted, style = MaterialTheme.typography.bodySmall)
                 Hint(Icons.Outlined.CloudDownload, if (provider.gasapp) "가스앱 본인인증으로 ${provider.name} 사용 계약과 청구 이력을 가져와요." else "${provider.name} 계정으로 청구 이력을 가져올 수 있어요.")
                 ActionButton("${provider.name} 연결하기", Icons.Outlined.Login, !busy) { onLogin(providerId) }
@@ -452,7 +485,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@Composable private fun SubmissionPage(data: AppData, target: SelfReadTarget?, now: Long, busy: Boolean,
+@Composable private fun SubmissionPage(data: AppData, target: SelfReadTarget?, now: Long, estimate: Estimate, busy: Boolean,
     refresh: () -> Unit, submit: (Double) -> Unit,
     changeSettings: (SubmissionSettings) -> Unit) {
     val settings = data.submissionSettings
@@ -484,15 +517,17 @@ class MainActivity : ComponentActivity() {
         return
     }
     val gasappTarget = data.cachedGasappTarget
-    val decision = if (provider.gasapp) GasappSubmissionPolicy.decide(data, gasappTarget, now, automatic = false)
+    val decision = remember(data, target, gasappTarget, now) {
+        if (provider.gasapp) GasappSubmissionPolicy.decide(data, gasappTarget, now, automatic = false)
         else SubmissionPolicy.decide(data, target, now, automatic = false)
+    }
     val hasTarget = if (provider.gasapp) gasappTarget != null else target != null
     val periodStart = if (provider.gasapp) gasappTarget?.start else target?.start
     val periodEnd = if (provider.gasapp) gasappTarget?.end else target?.end
     val submitted = if (provider.gasapp) gasappTarget?.submitted == true else target?.submitted == true
     val submittedValue = if (provider.gasapp) gasappTarget?.submittedValue else target?.submittedValue
     val demoDate = dateOf(now)
-    val demoValue = Estimator.estimate(data, now).reading?.let { kotlin.math.round(it * 10.0) / 10.0 }
+    val demoValue = if (demo) estimate.reading?.let { kotlin.math.round(it * 10.0) / 10.0 } else null
     Page {
         Title("자가검침 제출", "기간과 숫자를 확인해 직접 제출하거나, 조건을 정해 마지막 날 자동으로 제출해요.")
         if (demo) Badge("예시 데이터 · 실제로 제출되지 않아요")
@@ -709,14 +744,14 @@ class MainActivity : ComponentActivity() {
     }
 }
 @Composable private fun SettingToggle(text: String, supportingText: String, icon: ImageVector, checked: Boolean, change: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().toggleable(value = checked, role = Role.Switch, onValueChange = change).padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Icon(icon, null, Modifier.size(22.dp), tint = Muted)
         Spacer(Modifier.width(16.dp))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(text, fontWeight = FontWeight.SemiBold)
             Text(supportingText, color = Muted, style = MaterialTheme.typography.bodySmall)
         }
-        Switch(checked = checked, onCheckedChange = change)
+        Switch(checked = checked, onCheckedChange = null)
     }
 }
 @Composable private fun SettingChoice(label: String, value: String, icon: ImageVector, values: List<String>, change: (String) -> Unit) {
@@ -730,9 +765,7 @@ class MainActivity : ComponentActivity() {
             Spacer(Modifier.width(8.dp))
             Icon(Icons.Outlined.ExpandMore, null, Modifier.size(20.dp))
         }
-        DropdownMenu(expanded, onDismissRequest = { expanded = false }, modifier = Modifier.heightIn(max = 350.dp)) {
-            values.forEach { item -> DropdownMenuItem(text = { Text(item) }, onClick = { change(item); expanded = false }) }
-        }
+        SelectedOptionsMenu(expanded, { expanded = false }, value, values) { change(it); expanded = false }
     }
 }
 @Composable private fun SettingAction(text: String, icon: ImageVector, action: () -> Unit, supportingText: String? = null,
@@ -758,10 +791,23 @@ class MainActivity : ComponentActivity() {
             OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp), shape = RoundedCornerShape(12.dp)) {
                 Text(value, Modifier.weight(1f)); Icon(Icons.Outlined.ExpandMore, null)
             }
-            DropdownMenu(expanded, onDismissRequest = { expanded = false }, modifier = Modifier.heightIn(max = 350.dp)) {
-                values.forEach { item -> DropdownMenuItem(text = { Text(item) }, onClick = { change(item); expanded = false }) }
-            }
+            SelectedOptionsMenu(expanded, { expanded = false }, value, values) { change(it); expanded = false }
         }
+    }
+}
+
+@Composable private fun SelectedOptionsMenu(expanded: Boolean, dismiss: () -> Unit, value: String, values: List<String>, change: (String) -> Unit) {
+    val scroll = rememberScrollState()
+    val itemPixels = with(LocalDensity.current) { 48.dp.roundToPx() }
+    LaunchedEffect(expanded, scroll.maxValue, value, values) {
+        if (expanded && scroll.maxValue != Int.MAX_VALUE) scroll.scrollTo((values.indexOf(value).coerceAtLeast(0) * itemPixels).coerceAtMost(scroll.maxValue))
+    }
+    DropdownMenu(expanded, onDismissRequest = dismiss, scrollState = scroll, modifier = Modifier.heightIn(max = 350.dp)) {
+        values.forEach { item -> DropdownMenuItem(
+            text = { Text(item, maxLines = 1) },
+            modifier = Modifier.height(48.dp).semantics { selected = item == value },
+            trailingIcon = { if (item == value) Icon(Icons.Outlined.Check, null) },
+            onClick = { change(item) }) }
     }
 }
 
@@ -821,7 +867,7 @@ class MainActivity : ComponentActivity() {
                     visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                     trailingIcon = { IconButton(onClick = { visible = !visible }) { Icon(if (visible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility, if (visible) "비밀번호 숨기기" else "비밀번호 보기") } })
-                Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(rememberPassword, { rememberPassword = it }, enabled = !busy); Text("이 기기에 암호화해서 저장", style = MaterialTheme.typography.bodySmall) }
+                Row(Modifier.fillMaxWidth().toggleable(value = rememberPassword, enabled = !busy, role = Role.Checkbox, onValueChange = { rememberPassword = it }), verticalAlignment = Alignment.CenterVertically) { Checkbox(rememberPassword, null, enabled = !busy); Text("이 기기에 암호화해서 저장", style = MaterialTheme.typography.bodySmall) }
                 TextButton(onClick = { open(provider.accountRecovery) }, enabled = !busy) { Text("아이디·비밀번호가 기억나지 않아요") }
                 if (provider.skens) TextButton(onClick = { open(provider.registration) }, enabled = !busy) { Text("${provider.name} 회원가입") }
                 if (busy) {

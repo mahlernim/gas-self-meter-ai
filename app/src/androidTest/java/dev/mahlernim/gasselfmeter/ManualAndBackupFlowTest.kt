@@ -58,12 +58,13 @@ class ManualAndBackupFlowTest {
             assertNotNull("System document picker Save button", save)
             save.click()
             device.wait(Until.hasObject(By.pkg("dev.mahlernim.gasselfmeter")), 5000)
-            compose.waitForIdle()
+            compose.awaitStorage(scenario)
             scenario.onActivity { activity -> androidx.lifecycle.ViewModelProvider(activity)[GasViewModel::class.java].message = null }
             compose.onNodeWithText("백업 가져오기").performScrollTo().performClick()
             val file = device.wait(Until.findObject(By.text(filename)), 5000)
             assertNotNull("Exported backup should appear in the system picker", file)
             file.click()
+            compose.waitUntil(5_000) { compose.onAllNodesWithText("백업 기록으로 바꿀까요?").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("백업 기록으로 바꿀까요?").assertIsDisplayed()
             compose.onNodeWithText("복원", useUnmergedTree = true).performClick()
             compose.awaitStorage(scenario)

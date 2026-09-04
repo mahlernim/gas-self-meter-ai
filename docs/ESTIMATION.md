@@ -28,7 +28,7 @@ Meter replacement starts a new active meter identifier. Prior physical observati
 
 The app distinguishes cumulative meter estimate, daily usage rate, and usage since the last bill boundary. A future planned reading date can show a forecast with today's evidence frozen. It never treats a forecast as a measurement.
 
-`맞음`, `+0.1`, `−0.1`, and direct input all open the same final physical-confirmation step. Adjustments within ten minutes replace the previous check and retain the original pre-correction forecast. A decreasing meter reading is rejected against the preceding anchor. Correct an erroneous older observation by deleting it, or start a new meter when appropriate.
+`계량기 보고 보정하기` opens a physical-confirmation dialog. Enter the observed reading or adjust it with `+0.1` and `−0.1`, then choose `이 숫자로 확인` to save. This records a local physical observation and does not submit it to the supplier. Adjustments within ten minutes replace the previous check and retain the original pre-correction forecast. A decreasing meter reading is rejected against the preceding anchor. Correct an erroneous older observation by deleting it, or start a new meter when appropriate.
 
 ## Cost
 
