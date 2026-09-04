@@ -3,6 +3,7 @@ package dev.mahlernim.gasselfmeter
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.SocketPolicy
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
@@ -92,6 +93,38 @@ class GasappApiTest {
             api.submit(session, GasappApi.parseTarget(JSONObject(targetJson), account), 36.0, LocalDate.of(2026, 9, 18))
         }
         assertEquals(1, server.requestCount)
+    }
+
+    @Test fun lostPostResponseReconcilesWithoutSecondPost() = withApi { server, api ->
+        server.enqueue(response(targetJson))
+        server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST))
+        server.enqueue(response(JSONObject(targetJson).put("inputYn", "Y").put("thisMonthIndicatorCustomer", 36).toString()))
+        val expected = GasappApi.parseTarget(JSONObject(targetJson), account)
+        assertEquals(GasappSubmitStatus.CONFIRMED, api.submit(session, expected, 36.0, LocalDate.of(2026, 9, 18)).status)
+        assertEquals(listOf("GET", "POST", "GET"), List(3) { server.takeRequest().method })
+        assertEquals(3, server.requestCount)
+    }
+
+    @Test fun successfulHttpWithoutReceiptIsNotRejectedOrConfirmed() = withApi { server, api ->
+        server.enqueue(response(targetJson))
+        server.enqueue(response("{}"))
+        server.enqueue(response(targetJson))
+        assertEquals(GasappSubmitStatus.UNCERTAIN, api.submit(session, GasappApi.parseTarget(JSONObject(targetJson), account),
+            36.0, LocalDate.of(2026, 9, 18)).status)
+    }
+
+    @Test fun snapshotUsesActualAmiAndWorksBeforeSelfReadingRegistration() = withApi { server, api ->
+        server.enqueue(response("""{"cards":{}}"""))
+        server.enqueue(response("""[{"requestYm":"2026-08","useQty":12,"chargeAmtQty":14000}]"""))
+        server.enqueue(response("""[{"meterIdNum":"meter"}]"""))
+        server.enqueue(response("null"))
+        val snapshot = api.snapshot(session, account)
+        assertTrue(server.takeRequest().path!!.contains("amiYn=Y"))
+        assertFalse(snapshot.target.registered)
+        assertNotNull(snapshot.target.meter)
+        assertEquals(12.0, snapshot.bills.single().usage!!, 0.0)
+        assertTrue(snapshot.readings.isEmpty())
+        assertEquals(4, server.requestCount)
     }
 
     @Test fun decimalsAndOutOfWindowNeverSubmit() = withApi { server, api ->
