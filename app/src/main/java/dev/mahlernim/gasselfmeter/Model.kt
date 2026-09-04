@@ -71,6 +71,12 @@ object SubmissionPolicy {
         if (automatic && !Providers.get(data.profile.providerId).automaticSubmission) return SubmissionDecision(false, null, "이 공급사는 직접 확인 입력만 지원해요.")
         if (automatic && data.credentials == null) return SubmissionDecision(false, null, "자동 입력에 필요한 로그인 정보가 저장되어 있지 않아요.")
         if (target == null) return SubmissionDecision(false, null, "먼저 공급사에서 검침 기간을 확인해 주세요.")
+        if (SkensClient.contractKey(Providers.get(data.profile.providerId), target.contract) != data.profile.contract) {
+            return SubmissionDecision(false, null, "조회한 계약이 저장된 계약과 달라요. 공급사를 다시 연결해 주세요.")
+        }
+        if (target.serial.isBlank() || SkensClient.opaque(target.serial) != data.profile.meter) {
+            return SubmissionDecision(false, null, "계량기가 변경되었어요. 공급사를 새로고침하고 실제 숫자를 다시 확인해 주세요.")
+        }
         if (!target.eligible) return SubmissionDecision(false, null, "이 계약은 자가검침 대상이 아니에요.")
         if (target.submitted) return SubmissionDecision(false, target.submittedValue, "이번 검침값은 이미 입력되어 있어요.")
         val date = dateOf(time)

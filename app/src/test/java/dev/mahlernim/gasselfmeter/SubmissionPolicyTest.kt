@@ -14,10 +14,10 @@ class SubmissionPolicyTest {
         planned = "20260904", vLdo = "", installation = ""
     )
     private fun data(lastCheckDaysAgo: Long = 1, records: List<SubmissionRecord> = emptyList()) = AppData(
-        profile = Profile("busan", "meter", "contract"),
+        profile = Profile("busan", SkensClient.opaque("meter"), SkensClient.contractKey(Providers.skens("busan"), target.contract)),
         observations = listOf(
-            Observation(time - 8 * 86_400_000L, 100.0, "meter"),
-            Observation(time - lastCheckDaysAgo * 86_400_000L, 107.0, "meter")
+            Observation(time - 8 * 86_400_000L, 100.0, SkensClient.opaque("meter")),
+            Observation(time - lastCheckDaysAgo * 86_400_000L, 107.0, SkensClient.opaque("meter"))
         ),
         credentials = Credentials("user", "secret"),
         submissionSettings = SubmissionSettings(enabled = true, automatic = true, requireRecentCheck = true, recentDays = 7),
@@ -44,7 +44,8 @@ class SubmissionPolicyTest {
     }
 
     @Test fun submissionSupportsConfiguredSkensProvidersOnly() {
-        val koone = data().copy(profile = data().profile.copy(providerId = "koone"))
+        val koone = data().copy(profile = data().profile.copy(providerId = "koone",
+            contract = SkensClient.contractKey(Providers.skens("koone"), target.contract)))
         assertTrue(SubmissionPolicy.decide(koone, target, time, automatic = false).allowed)
         assertFalse(SubmissionPolicy.decide(koone, target, time, automatic = true).allowed)
         val seoul = data().copy(profile = data().profile.copy(providerId = "seoul"))
@@ -58,5 +59,40 @@ class SubmissionPolicyTest {
         assertEquals(listOf(record), imported.submissions)
         assertFalse(imported.submissionSettings.enabled)
         assertNull(imported.credentials)
+    }
+
+    @Test fun changedContractOrMeterBlocksManualAndAutomaticSubmission() {
+        val changedTargets = listOf(
+            target.copy(contract = target.contract.copy(ca = "3")),
+            target.copy(contract = target.contract.copy(bp = "3")),
+            target.copy(serial = "replacement"),
+            target.copy(serial = "")
+        )
+        for (automatic in listOf(false, true)) {
+            assertTrue(SubmissionPolicy.decide(data(), target, time, automatic).allowed)
+            changedTargets.forEach { changed ->
+                assertFalse(SubmissionPolicy.decide(data(), changed, time, automatic).allowed)
+            }
+        }
+    }
+
+    @Test fun confirmationRequiresSameContractMeterPeriodAndExactReading() {
+        val confirmed = target.copy(submitted = true, submittedValue = 108.0)
+        assertTrue(SkensClient.confirmsSubmission(target, confirmed, 108.0))
+        val unconfirmed = listOf(
+            confirmed.copy(submitted = false),
+            confirmed.copy(submittedValue = null),
+            confirmed.copy(submittedValue = 109.0),
+            confirmed.copy(submittedValue = Double.NaN),
+            confirmed.copy(contract = target.contract.copy(ca = "3")),
+            confirmed.copy(contract = target.contract.copy(bp = "3")),
+            confirmed.copy(serial = "replacement"),
+            confirmed.copy(cycle = "next-cycle"),
+            confirmed.copy(start = date.minusDays(1).toString()),
+            confirmed.copy(end = date.plusDays(1).toString()),
+            confirmed.copy(planned = "20261004"),
+            confirmed.copy(installation = "replacement")
+        )
+        unconfirmed.forEach { assertFalse(SkensClient.confirmsSubmission(target, it, 108.0)) }
     }
 }

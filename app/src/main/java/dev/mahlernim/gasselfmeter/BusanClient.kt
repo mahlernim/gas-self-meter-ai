@@ -152,12 +152,19 @@ class SkensClient(private val provider: Provider, private val credentials: Crede
         val accepted = response.optString("result").trim() == "Y"
         if (!accepted) return SubmissionOutcome(false, false)
         val refreshed = selfReadTarget(target.contract)
-        val confirmed = refreshed.submitted && (refreshed.submittedValue == null || abs(refreshed.submittedValue - value) < .001)
+        val confirmed = confirmsSubmission(target, refreshed, value)
         return SubmissionOutcome(true, confirmed)
     }
     override fun close() { synchronized(cookies) { cookies.clear() }; client.connectionPool.evictAll(); client.dispatcher.executorService.shutdown() }
 
     companion object {
+        internal fun confirmsSubmission(target: SelfReadTarget, refreshed: SelfReadTarget, value: Double): Boolean =
+            refreshed.contract.bp == target.contract.bp && refreshed.contract.ca == target.contract.ca &&
+                refreshed.serial == target.serial && refreshed.cycle == target.cycle &&
+                refreshed.start == target.start && refreshed.end == target.end &&
+                refreshed.planned == target.planned && refreshed.installation == target.installation &&
+                refreshed.submitted && refreshed.submittedValue?.let { it.isFinite() && abs(it - value) < .001 } == true
+
         fun contractKey(provider: Provider, contract: Contract) = opaque("${provider.skensCode}:${contract.bp}:${contract.ca}")
         fun parsePortalDate(value: String): String = LocalDate.parse(value.replace('.', '-').replace('/', '-'),
             if (value.matches(Regex("\\d{8}"))) java.time.format.DateTimeFormatter.BASIC_ISO_DATE else java.time.format.DateTimeFormatter.ISO_LOCAL_DATE).toString()
