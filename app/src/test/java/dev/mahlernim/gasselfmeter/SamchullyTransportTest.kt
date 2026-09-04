@@ -31,7 +31,9 @@ class SamchullyTransportTest {
             throw IOException("synthetic connection loss")
         }.build()
         SamchullyReadClient(Providers.get("samchully"), Credentials("synthetic", "synthetic"), http).use {
-            assertThrows(IOException::class.java) { it.user(SamchullySession("synthetic-token", "PER")) }
+            val failure = assertThrows(ProviderFailure::class.java) { it.user(SamchullySession("synthetic-token", "PER")) }
+            assertEquals("user", failure.stage)
+            assertEquals("network", failure.category)
         }
         assertEquals(1, requests)
         assertFalse(http.retryOnConnectionFailure)

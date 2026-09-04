@@ -21,6 +21,7 @@ object DataCodec {
         put("schema", 4)
         put("ready", data.ready)
         GasappCodec.encode(this, data, includeCredentials)
+        SamchullyCodec.encode(this, data.samchullyBills)
         put("profile", JSONObject().apply {
             put("providerId", data.profile.providerId); put("meter", data.profile.meter)
             put("contract", data.profile.contract); put("plannedDate", data.profile.plannedDate)
@@ -125,7 +126,8 @@ object DataCodec {
         } else null
         return AppData(profile, periods, observations, credentials, settings, submissions, json.optBoolean("ready", true), cached,
             GasappCodec.connection(json, allowCredentials), GasappCodec.target(json, allowCredentials), GasappCodec.bills(json),
-            if (allowCredentials && !json.isNull("gasappMeterChangeObservedAt")) json.getLong("gasappMeterChangeObservedAt") else null)
+            if (allowCredentials && !json.isNull("gasappMeterChangeObservedAt")) json.getLong("gasappMeterChangeObservedAt") else null,
+            SamchullyCodec.decode(json))
     }
 }
 

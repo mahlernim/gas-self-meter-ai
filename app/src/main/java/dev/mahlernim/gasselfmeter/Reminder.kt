@@ -119,7 +119,8 @@ class SubmissionWorker(context: Context, params: WorkerParameters) : Worker(cont
                         if (status == "confirmed") applicationContext.getSystemService(NotificationManager::class.java).cancel(3)
                     }
                 }
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                Diagnostics.record(applicationContext, expected.profile.providerId, "submit", e)
                 if (pending != null) {
                     store.update { BackgroundState.finish(it, expected, pending!!.copy(status = "uncertain", detail = ReminderPolicy.UNCERTAIN)) }
                     text = ReminderPolicy.UNCERTAIN
@@ -156,7 +157,11 @@ class SubmissionReminderWorker(context: Context, params: WorkerParameters) : Wor
             if (text != null) notify(applicationContext, 3, SubmissionScheduler.CHANNEL, "자가검침 제출 안내", "똑똑 자가검침 AI", text)
             else applicationContext.getSystemService(NotificationManager::class.java).cancel(3)
             return Result.success()
-        } catch (_: Exception) { return Result.retry() }
+        } catch (e: Exception) {
+            val provider = runCatching { SecureStore(applicationContext).read().profile.providerId }.getOrDefault("unknown")
+            Diagnostics.record(applicationContext, provider, "background", e)
+            return Result.retry()
+        }
         finally { SubmissionGate.lock.unlock() }
     }
 }
@@ -169,7 +174,6 @@ class ReminderWorker(context: Context, params: WorkerParameters) : Worker(contex
         return Result.success()
     }
 }
-
 
 
 

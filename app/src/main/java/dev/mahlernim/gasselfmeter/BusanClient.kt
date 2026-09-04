@@ -53,7 +53,12 @@ class SkensClient(private val provider: Provider, private val credentials: Crede
             .header("Referer", "https://ebpp.skens.com/${provider.id}/main/index.do")
         if (data != null) builder.post(FormBody.Builder().apply { data.forEach { (k, v) -> add(k, v) } }.build())
         return client.newCall(builder.build()).execute().use { response ->
-            check(response.isSuccessful) { "도시가스 사이트에 연결하지 못했어요. 잠시 후 다시 시도해 주세요." }
+            if (!response.isSuccessful) throw ProviderFailure(when {
+                path.startsWith("login/") -> "login"
+                path.startsWith("charge/") -> "bills"
+                path == "read/insertSelfRead.do" -> "submit"
+                else -> "meter"
+            }, if (response.code in setOf(401, 403)) "authentication" else "http", response.code)
             val body = response.body ?: error("조회 결과가 비어 있어요.")
             check(body.contentLength() <= 4_000_000) { "조회 결과가 예상보다 커요." }
             val bytes = body.byteStream().readBytesLimited(4_000_000)

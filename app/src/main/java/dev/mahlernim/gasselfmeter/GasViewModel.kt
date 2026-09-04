@@ -25,6 +25,7 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
     var contracts by mutableStateOf<List<Contract>>(emptyList()); private set
     var selfReadTarget by mutableStateOf<SelfReadTarget?>(null); private set
     private var pendingClient: SkensClient? = null
+    private var pendingSamchully: SamchullyLogin? = null
     private var pendingProvider: Provider? = null
     private var pendingCredentials: Credentials? = null
     private var remember = true
@@ -46,12 +47,13 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
             submissions = if (next.submissions == before.submissions) latest.submissions else next.submissions,
             cachedSelfRead = if (next.cachedSelfRead == before.cachedSelfRead) latest.cachedSelfRead else next.cachedSelfRead,
             gasappBills = if (next.gasappBills == before.gasappBills) latest.gasappBills else next.gasappBills,
+            samchullyBills = if (next.samchullyBills == before.samchullyBills) latest.samchullyBills else next.samchullyBills,
             cachedGasappTarget = if (next.cachedGasappTarget == before.cachedGasappTarget) latest.cachedGasappTarget else next.cachedGasappTarget,
             gasappMeterChangeObservedAt = if (next.gasappMeterChangeObservedAt == before.gasappMeterChangeObservedAt) latest.gasappMeterChangeObservedAt else next.gasappMeterChangeObservedAt)
         }
         selfReadTarget = data.cachedSelfRead
     }
-    fun attempt(action: () -> Unit) { try { action() } catch (e: Exception) { message = readableError(e) } }
+    fun attempt(action: () -> Unit) { try { action() } catch (e: Exception) { message = reportError(e) } }
     fun manual(provider: String) = attempt {
         save(data.copy(profile = data.profile.copy(providerId = provider), ready = true))
     }
@@ -63,7 +65,7 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
             message = "실제 확인값을 저장했어요. 화면과 다음 추정에 반영했어요."
             true
         } catch (e: Exception) {
-            message = readableError(e)
+            message = reportError(e)
             false
         }
     }
@@ -113,6 +115,10 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
     fun login(providerId: String, username: String, password: String, rememberPassword: Boolean) {
         if (busy) return
         if (username.isBlank() || password.isBlank()) { message = "아이디와 비밀번호를 입력해 주세요."; return }
+        if (Providers.get(providerId).experimentalReadOnly) {
+            loginSamchully(username, password, rememberPassword)
+            return
+        }
         busy = true; loginError = null; setProgress(0, 5, "1단계 · 공급사에 안전하게 로그인하는 중"); remember = rememberPassword
         viewModelScope.launch {
             try {
@@ -124,7 +130,7 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
                 contracts = list
                 setProgress(1, 5, "2단계 · 연결된 계약을 확인하는 중")
                 if (list.size == 1) syncSelected(list.first())
-            } catch (e: Exception) { loginError = readableError(e); message = loginError; clearPending() }
+            } catch (e: Exception) { loginError = reportError(e); message = loginError; clearPending() }
             finally { busy = false }
         }
     }
@@ -132,11 +138,25 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
         if (busy) return
         busy = true
         viewModelScope.launch {
-            try { syncSelected(contract) } catch (e: Exception) { loginError = readableError(e); message = loginError; clearPending() }
+            try { syncSelected(contract) } catch (e: Exception) { loginError = reportError(e); message = loginError; clearPending() }
             finally { busy = false }
         }
     }
     private suspend fun syncSelected(contract: Contract) {
+        pendingSamchully?.let { login ->
+            setProgress(2, 4, "삼천리 청구 이력을 조회하는 중")
+            val selected = login.contracts.singleOrNull { it.customerNo == contract.ca }
+                ?: error("선택한 삼천리 계약을 찾지 못했어요.")
+            val snapshot = withContext(Dispatchers.IO) {
+                SubmissionGate.lock.withLock { SamchullyBridge.snapshot(login, selected) }
+            }
+            save(SamchullyBridge.merge(data, snapshot, if (remember) pendingCredentials else null))
+            SubmissionScheduler.schedule(getApplication(), data)
+            ProviderRefresh.schedule(getApplication(), data)
+            message = "삼천리 청구 이력 ${snapshot.bills.size}개월을 가져왔어요. " + snapshot.warning
+            clearPending()
+            return
+        }
         setProgress(2, 5, "3단계 · 계량기와 검침 기간을 확인하는 중")
         val knownMonths = data.periods.mapNotNull { it.billMonth.takeIf(String::isNotBlank) }.toSet()
         val result = withContext(Dispatchers.IO) { SubmissionGate.lock.withLock { pendingClient!!.history(contract, knownMonths) { state ->
@@ -174,12 +194,13 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
                 val recent = data.submissions.lastOrNull { System.currentTimeMillis() - it.attemptedAt < 60_000 }
                 if (recent?.status == "confirmed") getApplication<Application>().getSystemService(android.app.NotificationManager::class.java).cancel(3)
                 message = recent?.detail ?: "공급사 정보를 확인했어요."
-            } catch (e: Exception) { message = readableError(e) }
+            } catch (e: Exception) { message = reportError(e) }
             finally { busy = false }
         }
     }
     fun checkSubmissionStatus() {
         if (busy) return
+        if (Providers.get(data.profile.providerId).experimentalReadOnly) { message = "삼천리는 실험적 조회 전용이에요. 검침 제출은 공급사 홈페이지를 이용해 주세요."; return }
         if (data.gasappConnection != null) { gasappAction("검침 기간과 제출 상태를 확인하는 중") { GasappBridge.checkStatus(getApplication()) }; return }
         val credentials = data.credentials ?: run { message = "자동 입력을 사용하려면 설정에서 로그인 정보를 암호화해 저장해 주세요."; return }
         busy = true; setProgress(0, 3, "검침 기간을 확인하려고 로그인하는 중")
@@ -196,12 +217,13 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
                 } }
                 save(data.copy(cachedSelfRead = selfReadTarget))
                 setProgress(3, 3, "검침 기간 확인을 마쳤어요")
-            } catch (e: Exception) { message = readableError(e) }
+            } catch (e: Exception) { message = reportError(e) }
             finally { busy = false }
         }
     }
     fun submitReading(value: Double) {
         if (busy) return
+        if (Providers.get(data.profile.providerId).experimentalReadOnly) { message = "삼천리는 조회 전용이며 검침값을 전송하지 않아요."; return }
         if (data.gasappConnection != null) {
             gasappAction("제출 직전 공급사 상태를 다시 확인하는 중") { GasappBridge.submit(getApplication(), value, automatic = false) }
             return
@@ -256,7 +278,7 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
                     store.update { BackgroundState.finish(it, reviewed, attempt.copy(status = "uncertain", detail = "전송 결과를 확정하지 못했어요. 자동 재전송하지 않습니다.")) }
                 }
                 data = store.read()
-                message = record?.let { "전송 결과를 확정하지 못했어요. 공급사 홈페이지에서 확인해 주세요." } ?: readableError(e)
+                message = record?.let { "전송 결과를 확정하지 못했어요. 공급사 홈페이지에서 확인해 주세요." } ?: reportError(e)
             } finally { busy = false }
         }
     }
@@ -286,12 +308,40 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
                 data = withContext(Dispatchers.IO) { ProviderRefresh.refresh(getApplication(), force) }
                 selfReadTarget = data.cachedSelfRead
                 if (force) message = "공급사 정보를 갱신했어요."
-            } catch (e: Exception) { if (force) message = readableError(e) }
+            } catch (e: Exception) {
+                val detail = reportError(e, "refresh")
+                if (force) message = detail
+            }
             finally { busy = false }
         }
     }
     fun cancelLogin() { if (!busy) clearPending() }
-    private fun clearPending() { pendingClient?.close(); pendingClient = null; pendingProvider = null; pendingCredentials = null; contracts = emptyList() }
+    private fun loginSamchully(username: String, password: String, rememberPassword: Boolean) {
+        clearPending()
+        pendingProvider = Providers.get("samchully")
+        pendingCredentials = Credentials(username.trim(), password)
+        remember = rememberPassword
+        busy = true
+        loginError = null
+        setProgress(0, 4, "삼천리에 로그인하고 계약을 확인하는 중")
+        viewModelScope.launch {
+            try {
+                pendingSamchully = withContext(Dispatchers.IO) {
+                    SubmissionGate.lock.withLock { SamchullyBridge.login(pendingCredentials!!) }
+                }
+                contracts = pendingSamchully!!.contracts.map { Contract("", it.customerNo, it.label) }
+                setProgress(1, 4, "사용 계약을 선택해 주세요")
+                if (contracts.size == 1) syncSelected(contracts.single())
+            } catch (e: Exception) {
+                loginError = reportError(e, "login")
+                message = loginError
+                clearPending()
+            } finally { busy = false }
+        }
+    }
+    private fun reportError(e: Exception, stage: String = "sync"): String =
+        readableError(e) + "\n" + Diagnostics.record(getApplication(), pendingProvider?.id ?: data.profile.providerId, stage, e)
+    private fun clearPending() { pendingClient?.close(); pendingClient = null; pendingSamchully = null; pendingProvider = null; pendingCredentials = null; contracts = emptyList() }
     fun restore(raw: String) = attempt {
         check(!busy) { "조회가 끝난 뒤 다시 시도해 주세요." }
         val restored = DataCodec.decode(raw)
@@ -304,7 +354,7 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
     }
     fun erase() = attempt {
         check(!busy) { "조회가 끝난 뒤 다시 시도해 주세요." }
-        clearPending(); Reminders.schedule(getApplication(), Profile()); SubmissionScheduler.schedule(getApplication(), AppData()); store.erase(); data = AppData(); selfReadTarget = null; storageError = false
+        clearPending(); Reminders.schedule(getApplication(), Profile()); SubmissionScheduler.schedule(getApplication(), AppData()); store.erase(); Diagnostics.clear(getApplication()); data = AppData(); selfReadTarget = null; storageError = false
         ProviderRefresh.schedule(getApplication(), data)
         message = "기기에 저장된 데이터를 모두 지웠어요."
     }

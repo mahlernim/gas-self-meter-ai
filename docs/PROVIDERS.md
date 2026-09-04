@@ -1,5 +1,9 @@
 # Korean gas-provider integration research
 
+## 0.3.1 experimental Samchully reads
+
+Samchully is available as an explicitly experimental read-only connection for alpha testers. Personal-account login, contract selection and bill history are wired into the app. Account-specific compatibility is not yet confirmed. Submission remains disabled. Local diagnostic metadata can be reviewed and copied by the tester, without automatic upload. See [the alpha patch notes](ALPHA_0.3.1.md).
+
 ## 0.3.0 Gasapp integration
 
 The app now includes an independently implemented Gasapp SMS authentication and contract workflow for 14 configured supplier brands. It retrieves bills, meter information and submission windows, supports explicit direct submission and optional last-day submission, and preserves uncertain outcomes without repeating the POST. Required terms and service/channel changes need in-app user consent. Marketing consent defaults to no. See [GASAPP.md](GASAPP.md) for current endpoint coverage and synthetic validation. The research notes below describe earlier observations and do not claim live customer authentication or submission verification.

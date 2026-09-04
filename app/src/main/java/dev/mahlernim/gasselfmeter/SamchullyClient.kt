@@ -51,20 +51,21 @@ data class SamchullySelfReadState(
 )
 
 /**
- * Inactive read-only client for the public Samchully customer-center contract.
- * It is deliberately not connected to onboarding and contains no write endpoint.
+ * Experimental read-only client for the public Samchully customer-center contract.
+ * Contains no write endpoint.
  */
 class SamchullyReadClient internal constructor(
     private val provider: Provider,
-   private val credentials: Credentials,
+    private val credentials: Credentials? = null,
     private val client: OkHttpClient = readOnlyHttpClient(),
 ) : AutoCloseable {
     init {
         require(provider.id == "samchully") { "삼천리 연결 대상이 아닌 공급사예요." }
-        require(credentials.username.isNotBlank() && credentials.password.isNotBlank()) { "삼천리 아이디와 비밀번호를 입력해 주세요." }
+        require(credentials == null || (credentials.username.isNotBlank() && credentials.password.isNotBlank())) { "삼천리 아이디와 비밀번호를 입력해 주세요." }
     }
 
-    fun login(userType: String = "PER", expiresInMillis: Int = 3_600_000): SamchullySession {
+    fun login(userType: String = "PER", expiresInMillis: Int = 3_600_000): SamchullySession = atStage("login") {
+        val credentials = requireNotNull(credentials) { "삼천리 아이디와 비밀번호를 입력해 주세요." }
         require(userType in setOf("PER", "BIZ", "BOI")) { "삼천리 회원 유형을 확인해 주세요." }
         require(expiresInMillis in setOf(600_000, 3_600_000, 14_400_000, 25_200_000)) { "삼천리 로그인 유지 시간을 확인해 주세요." }
         val first = payload(post("scl/auth/login-pwd", JSONObject().apply {
@@ -81,12 +82,14 @@ class SamchullyReadClient internal constructor(
             put("exp", expiresInMillis)
         }))
         val accessToken = clean(second, "accessToken") ?: error("삼천리 인증 토큰을 확인하지 못했어요.")
-        return SamchullySession(accessToken, resolvedType)
+        SamchullySession(accessToken, resolvedType)
     }
 
-    fun user(session: SamchullySession): SamchullyUser = parseUser(post("scl/users/me", JSONObject(), session.accessToken))
+    fun user(session: SamchullySession): SamchullyUser = atStage("user") {
+        parseUser(post("scl/users/me", JSONObject(), session.accessToken))
+    }
 
-    fun contracts(session: SamchullySession, user: SamchullyUser): List<SamchullyContract> {
+    fun contracts(session: SamchullySession, user: SamchullyUser): List<SamchullyContract> = atStage("contracts") {
         val birth = user.birthDate.filter(Char::isDigit).let { if (it.length == 8) it.drop(2) else it }
         require(birth.matches(Regex("\\d{6}"))) { "삼천리 회원 생년월일 형식을 확인하지 못했어요." }
         val response = post("scl/services/custinfo", JSONObject().apply {
@@ -95,10 +98,10 @@ class SamchullyReadClient internal constructor(
             put("I_BIRTH", birth)
             put("I_PHONE", user.phone.filter(Char::isDigit))
         }, session.accessToken)
-        return parseContracts(response)
+        parseContracts(response)
     }
 
-    fun bills(session: SamchullySession, customerNo: String, from: YearMonth, to: YearMonth): List<SamchullyBill> {
+    fun bills(session: SamchullySession, customerNo: String, from: YearMonth, to: YearMonth): List<SamchullyBill> = atStage("bills") {
         require(from <= to && java.time.temporal.ChronoUnit.MONTHS.between(from, to) in 0..60) { "삼천리 요금 조회 기간을 확인해 주세요." }
         requireCustomerNo(customerNo)
         val response = post("scl/services/goji-list", JSONObject().apply {
@@ -106,10 +109,10 @@ class SamchullyReadClient internal constructor(
             put("I_YYYYMM_FROM", from.toString().replace("-", ""))
             put("I_YYYYMM_TO", to.toString().replace("-", ""))
         }, session.accessToken)
-        return parseBills(response)
+        parseBills(response)
     }
 
-    fun selfReadState(session: SamchullySession, contract: SamchullyContract): SamchullySelfReadState {
+    fun selfReadState(session: SamchullySession, contract: SamchullyContract): SamchullySelfReadState = atStage("meter") {
         requireCustomerNo(contract.customerNo)
         val common = JSONObject().apply {
             put("I_VKONT", contract.customerNo)
@@ -121,7 +124,7 @@ class SamchullyReadClient internal constructor(
         val recent = post("scl/services/self-meter-list", JSONObject().apply {
             put("ET_VKONT", JSONArray().put(JSONObject().put("VKONT", contract.customerNo)))
         }, session.accessToken)
-        return parseSelfReadState(period, target, recent)
+        parseSelfReadState(period, target, recent)
     }
 
     private fun post(path: String, data: JSONObject, token: String? = null): JSONObject {
@@ -135,8 +138,15 @@ class SamchullyReadClient internal constructor(
             .post(data.toString().toRequestBody(JSON_MEDIA_TYPE))
             .build()
         return client.newCall(request).execute().use { response ->
-            check(response.code != 401) { "삼천리 로그인이 만료됐어요. 다시 로그인해 주세요." }
-            check(response.isSuccessful) { "삼천리 고객센터 조회에 실패했어요. 잠시 후 다시 시도해 주세요." }
+            val stage = when (path) {
+                "scl/auth/login-pwd", "scl/auth/login" -> "login"
+                "scl/users/me" -> "user"
+                "scl/services/custinfo" -> "contracts"
+                "scl/services/goji-list" -> "bills"
+                else -> "meter"
+            }
+            if (!response.isSuccessful) throw ProviderFailure(stage,
+                if (response.code == 401 || response.code == 403) "authentication" else "http", response.code)
             val body = response.body ?: error("삼천리 조회 결과가 비어 있어요.")
             val text = String(body.byteStream().readBytesLimited(MAX_RESPONSE_BYTES), Charsets.UTF_8)
             check(text.isNotBlank()) { "삼천리 조회 결과가 비어 있어요." }
@@ -147,6 +157,20 @@ class SamchullyReadClient internal constructor(
     override fun close() {
         client.connectionPool.evictAll()
         client.dispatcher.executorService.shutdown()
+    }
+
+    private inline fun <T> atStage(stage: String, action: () -> T): T = try {
+        action()
+    } catch (failure: ProviderFailure) {
+        throw failure
+    } catch (failure: Exception) {
+        val category = when (failure) {
+            is java.net.SocketTimeoutException -> "timeout"
+            is javax.net.ssl.SSLException -> "tls"
+            is java.io.IOException -> "network"
+            else -> "parse"
+        }
+        throw ProviderFailure(stage, category, cause = failure)
     }
 
     companion object {
