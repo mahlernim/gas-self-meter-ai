@@ -25,6 +25,7 @@ object GasappCodec {
         json.put("gasappBills", JSONArray().apply { data.gasappBills.forEach { b -> put(JSONObject()
             .put("month", b.month).put("usage", b.usage).put("amount", b.amount).put("start", b.start).put("end", b.end)) } })
         if (!secrets) return
+        json.put("gasappMeterChangeObservedAt", data.gasappMeterChangeObservedAt)
         data.gasappConnection?.let { c -> json.put("gasappConnection", JSONObject().put("account", account(c.account))
             .put("token", c.session.token).put("member", c.session.member).put("deviceId", c.session.deviceId)) }
         data.cachedGasappTarget?.let { t -> json.put("cachedGasappTarget", JSONObject().put("account", account(t.account))

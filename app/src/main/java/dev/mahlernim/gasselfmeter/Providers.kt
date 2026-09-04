@@ -38,6 +38,10 @@ object Providers {
         Provider("cncity", "CNCITY에너지", listOf("대전", "충남"), "https://www.cncityenergy.com/"),
         Provider("daesung", "대성에너지", listOf("대구", "경북"), "https://www.daesungenergy.com/"),
         Provider("haeyang", "해양에너지", listOf("광주", "전남"), "https://www.hyenergy.co.kr/"),
+        Provider("chambit", "참빛도시가스", listOf("강원", "충북"), "https://www.gasapp.co.kr/", automatic = true, gasapp = true, automaticSubmission = true),
+        Provider("mcenergy", "MC에너지", listOf("전남"), "https://www.gasapp.co.kr/", automatic = true, gasapp = true, automaticSubmission = true),
+        Provider("seohae", "미래엔서해에너지", listOf("충남"), "https://www.gasapp.co.kr/", automatic = true, gasapp = true, automaticSubmission = true),
+        Provider("daehwa", "대화도시가스", listOf("전남"), "https://www.gasapp.co.kr/", automatic = true, gasapp = true, automaticSubmission = true),
         Provider("other", "다른 공급사 / 직접 입력", listOf("전국"), "https://www.kogas.or.kr/site/koGas/1020408040000"),
     )
     val regions = listOf("부산", "서울", "경기", "인천", "울산", "경남", "대구", "경북", "대전", "세종", "충남", "충북", "광주", "전남", "전북", "강원", "제주")

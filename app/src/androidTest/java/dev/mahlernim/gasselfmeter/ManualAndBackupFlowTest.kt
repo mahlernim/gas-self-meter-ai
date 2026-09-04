@@ -45,6 +45,10 @@ class ManualAndBackupFlowTest {
             compose.onNodeWithText("기록 내보내기").performScrollTo().performClick()
             compose.waitForIdle()
             device.waitForIdle()
+            val filename = "gas-test-${System.currentTimeMillis()}.json"
+            val filenameInput = device.wait(Until.findObject(By.res("android:id/title").clazz("android.widget.EditText")), 5000)
+            assertNotNull("System document picker filename field", filenameInput)
+            filenameInput.text = filename
             val save = device.wait(Until.findObject(By.res("android:id/button1")), 5000)
             device.dumpWindowHierarchy(java.io.File(context.filesDir, "picker.xml"))
             assertNotNull("System document picker Save button", save)
@@ -53,7 +57,6 @@ class ManualAndBackupFlowTest {
             compose.waitForIdle()
             scenario.onActivity { activity -> androidx.lifecycle.ViewModelProvider(activity)[GasViewModel::class.java].message = null }
             compose.onNodeWithText("백업 가져오기").performScrollTo().performClick()
-            val filename = "gas-self-meter-${today()}.json"
             val file = device.wait(Until.findObject(By.text(filename)), 5000)
             assertNotNull("Exported backup should appear in the system picker", file)
             file.click()

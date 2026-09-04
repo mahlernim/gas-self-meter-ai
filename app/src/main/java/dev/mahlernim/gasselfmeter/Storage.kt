@@ -124,7 +124,8 @@ object DataCodec {
                 t.optString("planned"), t.optString("vLdo"), t.optString("installation"))
         } else null
         return AppData(profile, periods, observations, credentials, settings, submissions, json.optBoolean("ready", true), cached,
-            GasappCodec.connection(json, allowCredentials), GasappCodec.target(json, allowCredentials), GasappCodec.bills(json))
+            GasappCodec.connection(json, allowCredentials), GasappCodec.target(json, allowCredentials), GasappCodec.bills(json),
+            if (allowCredentials && !json.isNull("gasappMeterChangeObservedAt")) json.getLong("gasappMeterChangeObservedAt") else null)
     }
 }
 

@@ -63,6 +63,7 @@ data class AppData(
     val gasappConnection: GasappConnection? = null,
     val cachedGasappTarget: GasappTarget? = null,
     val gasappBills: List<GasappBill> = emptyList(),
+    val gasappMeterChangeObservedAt: Long? = null,
 )
 data class Estimate(val reading: Double?, val daily: Double?, val source: String, val ageDays: Long?, val anchorTime: Long?)
 data class SubmissionDecision(val allowed: Boolean, val value: Double?, val reason: String)

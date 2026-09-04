@@ -201,9 +201,13 @@ class MainActivity : ComponentActivity() {
         if (vm.calibrate(value)) calibration = null
     } }
     submitValue?.let { value ->
+        val provider = Providers.get(data.profile.providerId)
+        val valueText = decimalText(value, if (provider.gasapp) 0 else 1)
         AlertDialog(onDismissRequest = { submitValue = null }, title = { Text("검침값을 공급사에 입력할까요?") },
-            text = { Text("${Providers.get(data.profile.providerId).name}에 ${decimalText(value)} m³를 입력합니다. 전송 직전에 기간과 기존 제출 여부를 다시 확인하며, 결과가 불확실하면 자동으로 다시 보내지 않습니다.") },
-            confirmButton = { TextButton(onClick = { vm.submitReading(value); submitValue = null }) { Text("${decimalText(value)} m³ 입력") } },
+            text = { Text("${provider.name}에 $valueText m³를 입력합니다." +
+                (if (provider.gasapp) "\n\n가스앱은 소수점 아래를 제외한 정수 지침을 제출해요." else "") +
+                "\n\n전송 직전에 기간과 기존 제출 여부를 다시 확인하며, 결과가 불확실하면 자동으로 다시 보내지 않습니다.") },
+            confirmButton = { TextButton(onClick = { vm.submitReading(value); submitValue = null }) { Text("$valueText m³ 입력") } },
             dismissButton = { TextButton(onClick = { submitValue = null }) { Text("취소") } })
     }
     if (addHistory) HistoryDialog({ addHistory = false }) { start, end, value ->

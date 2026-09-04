@@ -56,4 +56,24 @@ class GasappIntegrationTest {
         val pending = SubmissionRecord(target.cycle, target.start!!, target.end!!, 113.0, time, "uncertain", "")
         assertFalse(GasappSubmissionPolicy.decide(calibrated.copy(submissions = listOf(pending)), target, time, automatic = false).allowed)
     }
+
+    @Test fun replacementRequiresCalibrationAfterFirstObservedChangeAndDoesNotResetOnRefresh() {
+        val time = dayStart(LocalDate.of(2026, 9, 7))
+        val changed = target.copy(meterChanged = true)
+        val base = data().copy(cachedGasappTarget = changed, gasappMeterChangeObservedAt = time - 1000,
+            observations = listOf(Observation(time - 86_400_000, 111.0, meter), Observation(time, 113.0, meter)))
+        assertEquals(time - 1000, GasappBridge.replacementObservedAt(base, changed, time + 1000))
+        assertTrue(GasappSubmissionPolicy.decide(base, changed, time, automatic = false).allowed)
+        assertFalse(GasappSubmissionPolicy.decide(base.copy(gasappMeterChangeObservedAt = time), changed, time, automatic = false).allowed)
+    }
+
+    @Test fun reconciliationCannotResurrectRemovedOrReplacedAttempt() {
+        val record = SubmissionRecord(target.cycle, target.start!!, target.end!!, 113.0, 1234L, "uncertain", "")
+        val initial = data().copy(submissions = listOf(record))
+        assertEquals("confirmed", GasappBridge.applyReconciliation(initial, initial, record).submissions.single().status)
+        val removed = initial.copy(submissions = emptyList())
+        assertTrue(GasappBridge.applyReconciliation(removed, initial, record).submissions.isEmpty())
+        val reset = AppData()
+        assertEquals(reset, GasappBridge.applyReconciliation(reset, initial, record))
+    }
 }

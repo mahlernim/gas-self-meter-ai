@@ -54,7 +54,30 @@ object GasappBridge {
         return data.copy(profile = data.profile.copy(providerId = providerId, contract = connection.account.key,
             customerNumber = connection.account.customer.ifBlank { connection.account.contract }, meter = meter,
             plannedDate = target.end, syncTime = now), periods = periods, ready = true, credentials = null,
-            cachedSelfRead = null, gasappConnection = connection, cachedGasappTarget = target, gasappBills = bills)
+            cachedSelfRead = null, gasappConnection = connection, cachedGasappTarget = target, gasappBills = bills, gasappMeterChangeObservedAt = replacementObservedAt(data, target, now))
+    }
+
+    fun replacementObservedAt(data: AppData, target: GasappTarget, now: Long): Long? {
+        val old = data.cachedGasappTarget
+        val changedMeter = target.meter != null && target.meter != data.profile.meter
+        val newlyFlagged = target.meterChanged && (old?.meterChanged != true || old.meter != target.meter)
+        return if (changedMeter || newlyFlagged) now else data.gasappMeterChangeObservedAt
+    }
+
+    private fun reconcileRecord(api: GasappApi, initial: AppData): SubmissionRecord? {
+        val expected = initial.cachedGasappTarget ?: return null
+        val record = initial.submissions.lastOrNull { it.cycle == expected.cycle && it.status in setOf("pending", "uncertain") } ?: return null
+        val connection = initial.gasappConnection ?: return null
+        if (expected.account.key != connection.account.key || expected.meter != initial.profile.meter) return null
+        val result = api.reconcile(connection.session, expected, record.value)
+        return record.takeIf { result.status == GasappSubmitStatus.CONFIRMED }
+    }
+
+    fun applyReconciliation(latest: AppData, initial: AppData, record: SubmissionRecord?): AppData {
+        if (record == null || !sameAccount(initial, latest)) return latest
+        val current = latest.submissions.lastOrNull { it.cycle == record.cycle }
+        if (current != record || current.status !in setOf("pending", "uncertain")) return latest
+        return latest.copy(submissions = latest.submissions.map { if (it == current) it.copy(status = "confirmed", detail = "공급사에서 제출 완료를 확인했어요.") else it })
     }
 
     fun refresh(context: Context, force: Boolean = false): AppData = SubmissionGate.lock.withLock {
@@ -64,7 +87,8 @@ object GasappBridge {
         if (!initial.ready || (!force && initial.profile.syncTime?.let { System.currentTimeMillis() - it < 86_400_000L } == true)) return@withLock initial
         GasappApi(connection.session.deviceId).use { api ->
             val snapshot = api.snapshot(connection.session, connection.account)
-            store.update { latest -> if (sameAccount(initial, latest)) merge(latest, connection, snapshot) else latest }.also {
+            val confirmed = reconcileRecord(api, initial)
+            store.update { latest -> if (sameAccount(initial, latest)) merge(applyReconciliation(latest, initial, confirmed), connection, snapshot) else latest }.also {
                 if (it.cachedGasappTarget?.submitted == true) context.getSystemService(android.app.NotificationManager::class.java).cancel(3)
             }
         }
@@ -76,7 +100,11 @@ object GasappBridge {
         val connection = initial.gasappConnection ?: error("가스앱에 다시 연결해 주세요.")
         GasappApi(connection.session.deviceId).use { api ->
             val target = api.target(connection.session, connection.account)
-            store.update { latest -> if (sameAccount(initial, latest)) latest.copy(cachedGasappTarget = target) else latest }
+            val confirmed = reconcileRecord(api, initial)
+            store.update { latest -> if (sameAccount(initial, latest)) applyReconciliation(latest, initial, confirmed).copy(
+                cachedGasappTarget = target, gasappMeterChangeObservedAt = replacementObservedAt(latest, target, System.currentTimeMillis())) else latest }.also {
+                if (it.cachedGasappTarget?.submitted == true) context.getSystemService(android.app.NotificationManager::class.java).cancel(3)
+            }
         }
     }
 
@@ -88,7 +116,7 @@ object GasappBridge {
             val target = api.target(connection.session, connection.account)
             val current = store.update { latest ->
                 check(sameAccount(initial, latest)) { "연결 계정이 변경됐어요. 다시 확인해 주세요." }
-                latest.copy(cachedGasappTarget = target)
+                latest.copy(cachedGasappTarget = target, gasappMeterChangeObservedAt = replacementObservedAt(latest, target, System.currentTimeMillis()))
             }
             val decision = GasappSubmissionPolicy.decide(current, target, automatic = automatic)
             require(decision.allowed && decision.value != null) { decision.reason }
@@ -134,7 +162,7 @@ object GasappSubmissionPolicy {
         if (automatic && !data.submissionSettings.automatic) return deny("자가검침 자동제출이 꺼져 있어요.")
         if (target == null) return deny("검침 기간을 먼저 확인해 주세요.")
         if (target.account.key != connection.account.key || data.profile.contract != target.account.key) return deny("계약 정보가 달라요. 다시 연결해 주세요.")
-        if (target.meter == null || target.meter != data.profile.meter || target.meterChanged) return deny("계량기 정보를 갱신하고 실제 숫자를 다시 확인해 주세요.")
+        if (target.meter == null || target.meter != data.profile.meter) return deny("계량기 정보를 갱신하고 실제 숫자를 다시 확인해 주세요.")
         if (!target.registered) return deny("자가검침 서비스 신청이 필요해요.")
         if (target.needsChannelChange) return deny("가스앱 검침으로 변경이 필요해요.")
         if (target.submitted) return deny("이번 검침값은 이미 제출했어요.")
@@ -146,6 +174,8 @@ object GasappSubmissionPolicy {
         if (prior?.status in setOf("pending", "uncertain", "confirmed")) return deny("이전 전송 결과를 공급사에서 확인해 주세요.")
         val observation = data.observations.lastOrNull { it.meter == data.profile.meter && it.time <= time }
             ?: return deny("실제 계량기 숫자를 먼저 확인해 주세요.")
+        if (target.meterChanged && (data.gasappMeterChangeObservedAt == null || observation.time <= data.gasappMeterChangeObservedAt))
+            return deny("교체된 계량기의 실제 숫자를 다시 확인해 주세요.")
         val age = ((time - observation.time) / 86_400_000L).coerceAtLeast(0)
         if (automatic && data.submissionSettings.requireRecentCheck && age > data.submissionSettings.recentDays) return deny("보정한 지 오래됐어요. 실제 숫자를 다시 확인해 주세요.")
         val estimate = Estimator.estimate(data, time).reading ?: return deny("제출할 지침을 계산할 수 없어요.")

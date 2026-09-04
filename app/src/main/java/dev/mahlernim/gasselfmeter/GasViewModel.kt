@@ -46,7 +46,8 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
             submissions = if (next.submissions == before.submissions) latest.submissions else next.submissions,
             cachedSelfRead = if (next.cachedSelfRead == before.cachedSelfRead) latest.cachedSelfRead else next.cachedSelfRead,
             gasappBills = if (next.gasappBills == before.gasappBills) latest.gasappBills else next.gasappBills,
-            cachedGasappTarget = if (next.cachedGasappTarget == before.cachedGasappTarget) latest.cachedGasappTarget else next.cachedGasappTarget)
+            cachedGasappTarget = if (next.cachedGasappTarget == before.cachedGasappTarget) latest.cachedGasappTarget else next.cachedGasappTarget,
+            gasappMeterChangeObservedAt = if (next.gasappMeterChangeObservedAt == before.gasappMeterChangeObservedAt) latest.gasappMeterChangeObservedAt else next.gasappMeterChangeObservedAt)
         }
         selfReadTarget = data.cachedSelfRead
     }
