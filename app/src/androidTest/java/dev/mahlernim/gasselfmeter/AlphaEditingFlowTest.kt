@@ -56,13 +56,14 @@ class AlphaEditingFlowTest {
     }
 
     @Test fun disconnectedAndUnsupportedProvidersHaveNoSubmissionControls() {
-        for ((provider, title) in listOf("busan" to "공급사 연결이 필요해요", "cncity" to "앱에서 제출을 지원하지 않아요")) {
+        val manual = listOf("cncity", "daesungclean", "knenergy", "seorabeol", "gse", "myungsung")
+        for ((provider, title) in listOf("busan" to "공급사 연결이 필요해요") + manual.map { it to "앱에서 제출을 지원하지 않아요" }) {
             SecureStore(context).write(AppData(profile = Profile(providerId = provider), ready = true))
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
                 awaitReady(scenario)
                 compose.onNodeWithText("제출", useUnmergedTree = true).performClick()
                 compose.onNodeWithText(title).assertIsDisplayed()
-                compose.onNodeWithText("공급사 홈페이지").assertIsDisplayed()
+                compose.onNodeWithText(if (provider == "myungsung") "공급사 안내" else "공급사 홈페이지").assertIsDisplayed()
                 compose.onAllNodes(isToggleable()).assertCountEquals(0)
                 compose.onNodeWithText("자가검침 자동제출").assertDoesNotExist()
             }

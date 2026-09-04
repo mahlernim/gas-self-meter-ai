@@ -18,3 +18,15 @@ research/busan-read-only-results.json
 artifacts/
 .private/
 *.log
+
+# Private investigation records. Ignore rules do not remove already tracked history.
+/AGENTS.md
+/research/
+/interim_reports/
+/intermediate_results/
+/primary_data/
+/secondary_data/
+/visualizations/
+/.codex-remote-attachments/
+/scripts/*
+!/scripts/build-release.ps1

@@ -1,5 +1,15 @@
 # Korean gas-provider integration research
 
+## 0.4.0 catalog expansion and evidence boundaries
+
+The catalog includes 31 named entries representing the 34 company rows in the [KOGAS directory](https://www.kogas.or.kr/site/koGas/1020408040000), checked September 4, 2026. Four Chambit companies remain grouped under one stable catalog ID. This is catalog coverage, not verified account or submission coverage.
+
+Daesung Clean Energy, Kyungnam Energy, Seorabeol City Gas, GSE and Myungsung PowerGreen are added for manual recording only. Chungcheong Energy Service also appears under Sejong. MC Energy includes its former Mokpo City Gas name. Supplier website links are separate from Gasapp connection routing. Grouped Chambit and Myungsung use the KOGAS directory where a single verified HTTPS supplier destination would be misleading or unavailable.
+
+Provider expansion issues remain open until their respective account-level acceptance criteria are met. Similar login forms do not establish identical billing adapters. Public frontend fields are observed client expectations, not authenticated success captures. Missing-token responses do not characterize expired tokens, and an empty bill response does not establish an invalid customer. A failed or 404 mutation probe does not establish successful authorization, endpoint absence or a replacement cancellation route.
+
+New EnergyTalk, Daesung-family and HaeYang authentication or submission paths are not activated in this release. Public menu presence and platform partnerships do not establish successful integration. Exact native HaeYang decryption behavior and Samchully cancellation behavior remain unverified. Existing alpha account workflows described below are separate from this manual catalog expansion.
+
 ## 0.3.1 experimental Samchully reads
 
 Samchully is available as an explicitly experimental read-only connection for alpha testers. Personal-account login, contract selection and bill history are wired into the app. Account-specific compatibility is not yet confirmed. Submission remains disabled. Local diagnostic metadata can be reviewed and copied by the tester, without automatic upload. See [the alpha patch notes](ALPHA_0.3.1.md).
@@ -52,7 +62,7 @@ All queries below were read-only and used no customer account.
 | Incheon City Gas | Public DWR `ICGAS.getChargecost.dwr` with region, usage class and effective date | HTTP 200 with the expected numeric rate field |
 | Gasapp frontend | Public landing page and its referenced JavaScript | HTTP 200. Split frontend bundles mean the bootstrap alone does not reveal the full API |
 
-The raw public probe script is [inspect_non_sk_public.py](../research/inspect_non_sk_public.py). Numeric tariffs are observations at the research date and are deliberately not hardcoded into the app. No customer history access was established by these tariff queries.
+Numeric tariffs are observations at the research date and are deliberately not hardcoded into the app. No customer history access was established by these tariff queries. Raw investigation scripts and internal capture records are not part of the public specification.
 
 ## SK E&S findings
 

@@ -396,7 +396,7 @@ class MainActivity : ComponentActivity() {
                 Hint(Icons.Outlined.EditNote, "이 공급사는 직접 입력으로 시작할 수 있어요. 자동 계정 연결은 아직 지원하지 않아요.")
                 if (provider.gasapp) Text("가스앱에서 확인한 과거 사용량을 입력할 수 있어요.", style = MaterialTheme.typography.bodySmall, color = Muted)
                 ActionButton("직접 입력으로 시작", Icons.Outlined.ArrowForward, !busy) { onManual(providerId) }
-                TextButton(onClick = { open(provider.website) }) { Text("공급사 홈페이지에서 확인") }
+                TextButton(onClick = { open(provider.website) }) { Text("${provider.websiteLabel}에서 확인") }
             }
         }
         Hint(Icons.Outlined.Lock, "로그인 정보와 사용 기록은 기기에 암호화해 보관해요. 별도 서버나 광고·분석 도구를 사용하지 않아요.")
@@ -461,6 +461,7 @@ class MainActivity : ComponentActivity() {
                 Text("최근 청구서의 단가·기본료·부가세를 적용한 참고값이에요. 요금 변경, 할인, 정산에 따라 실제 청구액과 달라져요.", color = Muted, style = MaterialTheme.typography.bodySmall)
             } else if (latest == null) Text("기간별 지침이 있는 청구 이력을 연결하면 이번 기간 사용량도 보여드려요.", color = Muted, style = MaterialTheme.typography.bodySmall)
         }
+        PredictionErrorCard(data, now)
         val planned = data.profile.plannedDate?.let(LocalDate::parse)?.takeIf { it >= today() && it <= today().plusDays(45) }
         if (planned != null) {
             val future = Estimator.estimate(data, dayStart(planned), now)
@@ -482,6 +483,20 @@ class MainActivity : ComponentActivity() {
             Text("최근 조회 ${dateOf(data.profile.syncTime)}", style = MaterialTheme.typography.bodySmall, color = Muted)
             TextButton(onClick = onRefresh, enabled = !busy) { Icon(Icons.Outlined.Refresh, null, Modifier.size(18.dp)); Text("공급사 정보 갱신") }
         }
+    }
+}
+
+@Composable private fun PredictionErrorCard(data: AppData, now: Long) {
+    val summary = remember(data.observations, data.profile.meter, now) { PredictionErrors.summarize(data, now) }
+    SurfaceCard {
+        Text("실측과 추정의 차이", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+        if (summary == null) {
+            Text("서로 다른 날의 실측과 확인 전 추정이 3회 이상 쌓이면 보여드려요.", color = Muted, style = MaterialTheme.typography.bodySmall)
+        } else {
+            Text("평균 차이 ${decimalText(summary.meanAbsoluteError)} m³ · 최대 ${decimalText(summary.maxAbsoluteError)} m³", fontWeight = FontWeight.Medium)
+            Text("${summary.firstCheckDate} ~ ${summary.lastCheckDate} · ${summary.sampleCount}회 비교", color = Muted, style = MaterialTheme.typography.bodySmall)
+        }
+        Text("최근 90일 중 최대 12일의 기록이에요. 확인 간격과 당시 모델이 달라 현재 오차 범위나 제출 안전성을 보장하지 않아요.", color = Muted, style = MaterialTheme.typography.bodySmall)
     }
 }
 
@@ -510,7 +525,7 @@ class MainActivity : ComponentActivity() {
             Title(if (supported) "공급사 연결이 필요해요" else "앱에서 제출을 지원하지 않아요")
             Text(if (supported) "설정의 다시 연결에서 계정을 연결하고 로그인 정보를 저장해 주세요. 연결 전에는 앱에서 조회·제출·제출 알림을 실행하지 않아요."
                 else "${provider.name}는 사용량과 실측을 직접 기록할 수 있어요. 검침값 제출은 공식 고객센터를 이용해 주세요.")
-            ActionButton("공급사 홈페이지", Icons.Outlined.OpenInNew) {
+            ActionButton(provider.websiteLabel, Icons.Outlined.OpenInNew) {
                 context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(provider.website)))
             }
         }
@@ -702,7 +717,7 @@ class MainActivity : ComponentActivity() {
             SettingInfo(provider.name, if (data.credentials == null && data.gasappConnection == null) "저장된 로그인 정보 없음" else "연결 정보가 이 기기에 암호화되어 있어요", Icons.Outlined.Apartment)
             if ((provider.passwordConnection || provider.gasapp) && data.profile.meter != "demo") SettingAction("다시 연결", Icons.Outlined.Login, login, "${provider.name} 계정과 계약을 다시 확인해요", !busy)
             if (provider.experimentalReadOnly) Text("실험적 조회 연결 · 검침 제출 미지원", Modifier.padding(12.dp), color = Muted)
-            SettingAction("공급사 홈페이지", Icons.Outlined.OpenInNew, { open(provider.website) }, provider.name)
+            SettingAction(provider.websiteLabel, Icons.Outlined.OpenInNew, { open(provider.website) }, provider.name)
             if (data.credentials != null || data.gasappConnection != null) SettingAction("로그인 정보 삭제", Icons.Outlined.NoAccounts, forget, "사용 기록은 그대로 유지해요", !busy)
         }
         SettingsSection("내 기록") {
