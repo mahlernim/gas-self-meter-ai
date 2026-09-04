@@ -4,11 +4,27 @@
 
 The catalog includes 31 named entries representing the 34 company rows in the [KOGAS directory](https://www.kogas.or.kr/site/koGas/1020408040000), checked September 4, 2026. Four Chambit companies remain grouped under one stable catalog ID. This is catalog coverage, not verified account or submission coverage.
 
-Daesung Clean Energy, Kyungnam Energy, Seorabeol City Gas, GSE and Myungsung PowerGreen are added for manual recording only. Chungcheong Energy Service also appears under Sejong. MC Energy includes its former Mokpo City Gas name. Supplier website links are separate from Gasapp connection routing. Grouped Chambit and Myungsung use the KOGAS directory where a single verified HTTPS supplier destination would be misleading or unavailable.
+Daesung Clean Energy, Kyungnam Energy, Seorabeol City Gas, GSE and Myungsung PowerGreen are added with manual household recording. The separate experiments below do not enable automatic history imports. Chungcheong Energy Service also appears under Sejong. MC Energy includes its former Mokpo City Gas name. Supplier website links are separate from Gasapp connection routing. Grouped Chambit and Myungsung use the KOGAS directory where a single verified HTTPS supplier destination would be misleading or unavailable.
 
 Provider expansion issues remain open until their respective account-level acceptance criteria are met. Similar login forms do not establish identical billing adapters. Public frontend fields are observed client expectations, not authenticated success captures. Missing-token responses do not characterize expired tokens, and an empty bill response does not establish an invalid customer. A failed or 404 mutation probe does not establish successful authorization, endpoint absence or a replacement cancellation route.
 
-New EnergyTalk, Daesung-family and HaeYang authentication or submission paths are not activated in this release. Public menu presence and platform partnerships do not establish successful integration. Exact native HaeYang decryption behavior and Samchully cancellation behavior remain unverified. Existing alpha account workflows described below are separate from this manual catalog expansion.
+The onboarding and settings screens include a separate alpha connection laboratory. Existing automatic connection, background refresh and submission flags remain unchanged. Laboratory results are not imported into household history or used for submission. New HaeYang authentication remains disabled. Exact native HaeYang decryption behavior and Samchully cancellation behavior remain unverified.
+
+## 0.4.0 experimental connection laboratory
+
+| Route | Implemented experiment | Evidence boundary |
+| --- | --- | --- |
+| Kyungnam Energy | Authorized customer-number lookup displaying billing month, amount, corrected m³ and MJ | Frontend-derived fields, not a successful account capture. Corrected volume is not raw meter usage. No period reconstruction or estimator import. Empty responses do not establish customer validity. |
+| Daesung Energy and Daesung Clean Energy | Exact official login forms followed by the monthly page, with bounded same-origin reads and no credential replay | A logout-looking link and monthly heading establish only session-like structure, not confirmed authentication. Returns table count and allowlisted labels, not customer rows or a billing schema. |
+| EnergyTalk | Official WebView login and address selection followed by native display-only usage and self-reading-state queries | Eleven service tenants include Chambit regions and a branch, not eleven verified independent suppliers. Real-account compatibility and successful retrieval remain unverified. No import or native submission. |
+
+EnergyTalk tenants are `cncity`, `kne`, `ktrm`, `miraense`, `srb`, `gse`, `cwjgas`, `ccbgas`, `cydgas`, `cdhgas` and `cscgas`. Users select their actual service and address. Authentication is handed to the official EnergyTalk/Kakao page. The app does not read passwords or exchange Kakao authorization codes itself.
+
+The official WebView is not read-only. It can offer registration, consent, payment and meter submission. Testers must not use payment or submission during the experiment. Native read-only code does not disable the website's own write actions. Native queries use session data in memory. Cleanup of EnergyTalk storage and some cookies is best effort on normal close. Kakao cookies are retained, and abnormal termination or cookie paths can leave additional web data behind.
+
+Direct-probe inputs and displayed results are not saved to household records or backups. Diagnostic summaries contain allowlisted stages and classifications, not customer identifiers or raw responses. The app adds no analytics or automatic diagnostic upload. Third-party web services apply their own privacy policies.
+
+Synthetic tests are separate from authorized account acceptance. This document does not claim final test-suite success or a successful live customer login. See [the alpha test guide](ALPHA_0.4.0.md) and [privacy policy](../PRIVACY.md).
 
 ## 0.3.1 experimental Samchully reads
 

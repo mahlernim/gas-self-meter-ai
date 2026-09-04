@@ -367,8 +367,10 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable private fun Welcome(busy: Boolean, onManual: (String) -> Unit, onLogin: (String) -> Unit, onDemo: () -> Unit, onImport: () -> Unit, open: (String) -> Unit, diagnostics: () -> Unit) {
+    var alphaLab by remember { mutableStateOf(false) }
     var region by rememberSaveable { mutableStateOf("부산") }
     var providerId by rememberSaveable { mutableStateOf("busan") }
+    if (alphaLab) AlphaConnectionsDialog(providerId, onDismiss = { alphaLab = false })
     Page {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Image(painterResource(R.drawable.app_icon), null, Modifier.size(56.dp).clip(RoundedCornerShape(16.dp)))
@@ -401,6 +403,7 @@ class MainActivity : ComponentActivity() {
         }
         Hint(Icons.Outlined.Lock, "로그인 정보와 사용 기록은 기기에 암호화해 보관해요. 별도 서버나 광고·분석 도구를 사용하지 않아요.")
         TextButton(onClick = diagnostics) { Text("진단 기록") }
+        TextButton(onClick = { alphaLab = true }, enabled = !busy) { Text("알파 연결 실험실") }
         Text("계량기 보고 보정하기는 실측값을 저장해요. 공급사 제출은 제출 탭에서 진행해요.", color = Muted, style = MaterialTheme.typography.bodySmall)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
             TextButton(onClick = onDemo, enabled = !busy) { Text("예시로 둘러보기") }
@@ -700,6 +703,8 @@ class MainActivity : ComponentActivity() {
 
 @Composable private fun SettingsPage(data: AppData, enable: () -> Unit, disable: () -> Unit, setTime: (Int, Int) -> Unit, setRepeatCount: (Int) -> Unit,
     login: () -> Unit, forget: () -> Unit, export: () -> Unit, restore: () -> Unit, meter: () -> Unit, erase: () -> Unit, update: () -> Unit, licenses: () -> Unit, open: (String) -> Unit, busy: Boolean, diagnostics: () -> Unit) {
+    var alphaLab by remember { mutableStateOf(false) }
+    if (alphaLab) AlphaConnectionsDialog(data.profile.providerId, onDismiss = { alphaLab = false })
     val provider = Providers.get(data.profile.providerId)
     Page {
         Title("앱 설정")
@@ -727,6 +732,7 @@ class MainActivity : ComponentActivity() {
             SettingAction("모든 데이터 삭제", Icons.Outlined.DeleteOutline, erase, "로그인 정보와 기록을 모두 지워요", contentColor = MaterialTheme.colorScheme.error)
         }
         SettingsSection("도움말과 앱 정보") {
+            SettingAction("알파 연결 실험실", Icons.Outlined.Science, { alphaLab = true }, "실험적 조회와 로그인 점검 · 실행 전 동의 필요", !busy)
             SettingAction("업데이트 확인", Icons.Outlined.SystemUpdate, update, "Google Play에서 최신 버전을 확인해요")
             SettingAction("테스터 그룹", Icons.Outlined.Groups, { open(AppLinks.TESTER_GROUP) }, "테스트 공지와 참여 계정을 관리해요")
             SettingAction("개인정보 처리방침", Icons.Outlined.PrivacyTip, { open(AppLinks.PRIVACY) })
