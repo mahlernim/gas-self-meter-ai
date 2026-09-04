@@ -171,7 +171,7 @@ object GasappSubmissionPolicy {
         if (date !in LocalDate.parse(target.start)..LocalDate.parse(target.end)) return deny("자가검침 입력 기간이 아니에요.")
         if (automatic && date != LocalDate.parse(target.end)) return deny("자동제출은 검침 기간 마지막 날에 실행해요.")
         val prior = data.submissions.lastOrNull { it.cycle == target.cycle }
-        if (prior?.status in setOf("pending", "uncertain", "confirmed")) return deny("이전 전송 결과를 공급사에서 확인해 주세요.")
+        if (prior?.status in setOf("pending", "uncertain", "confirmed") || (automatic && prior != null)) return deny("이전 전송 결과를 공급사에서 확인해 주세요.")
         val observation = data.observations.lastOrNull { it.meter == data.profile.meter && it.time <= time }
             ?: return deny("실제 계량기 숫자를 먼저 확인해 주세요.")
         if (target.meterChanged && (data.gasappMeterChangeObservedAt == null || observation.time <= data.gasappMeterChangeObservedAt))
