@@ -1,5 +1,10 @@
 # Korean gas-provider integration research
 
+## 0.3.0 Gasapp integration
+
+The app now includes an independently implemented Gasapp SMS authentication and contract workflow for 14 configured supplier brands. It retrieves bills, meter information and submission windows, supports explicit direct submission and optional last-day submission, and preserves uncertain outcomes without repeating the POST. Required terms and service/channel changes need in-app user consent. Marketing consent defaults to no. See [GASAPP.md](GASAPP.md) for current endpoint coverage and synthetic validation. The research notes below describe earlier observations and do not claim live customer authentication or submission verification.
+
+
 ## SK E&S 검침값 입력
 
 0.2.1은 단순 기록을 넘어 공급사의 자가검침 가능 기간과 기존 입력 상태를 확인하고, 계산한 누적 지침을 직접 또는 조건부로 자동 입력하도록 설계했습니다. 자동 입력은 기본적으로 꺼져 있으며 검침 기간 마지막 날에만 실행합니다.

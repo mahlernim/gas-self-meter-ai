@@ -34,6 +34,7 @@ data class Profile(
     val providerId: String = "busan", val meter: String = "manual", val contract: String = "",
     val plannedDate: String? = null, val syncTime: Long? = null, val reminder: Boolean = false,
     val reminderDay: Int = 7, val reminderHour: Int = 19,
+    val reminderRepeatCount: Int = 3, val customerNumber: String = "",
 )
 data class Credentials(val username: String, val password: String)
 data class SubmissionSettings(
@@ -41,6 +42,7 @@ data class SubmissionSettings(
     val automatic: Boolean = false,
     val requireRecentCheck: Boolean = true,
     val recentDays: Int = 7,
+    val reminder: Boolean = false, val reminderHour: Int = 9, val reminderMinute: Int = 0,
 )
 data class SubmissionRecord(
     val cycle: String,
@@ -57,6 +59,11 @@ data class AppData(
     val submissionSettings: SubmissionSettings = SubmissionSettings(),
     val submissions: List<SubmissionRecord> = emptyList(),
     val ready: Boolean = false,
+    val cachedSelfRead: SelfReadTarget? = null,
+    val gasappConnection: GasappConnection? = null,
+    val cachedGasappTarget: GasappTarget? = null,
+    val gasappBills: List<GasappBill> = emptyList(),
+    val gasappMeterChangeObservedAt: Long? = null,
 )
 data class Estimate(val reading: Double?, val daily: Double?, val source: String, val ageDays: Long?, val anchorTime: Long?)
 data class SubmissionDecision(val allowed: Boolean, val value: Double?, val reason: String)
@@ -65,7 +72,6 @@ object SubmissionGate { val lock = ReentrantLock() }
 object SubmissionPolicy {
     fun decide(data: AppData, target: SelfReadTarget?, time: Long = System.currentTimeMillis(), automatic: Boolean): SubmissionDecision {
         val settings = data.submissionSettings
-        if (!settings.enabled) return SubmissionDecision(false, null, "검침값 입력 기능이 꺼져 있어요.")
         if (automatic && !settings.automatic) return SubmissionDecision(false, null, "마지막 날 자동 입력이 꺼져 있어요.")
         if (!Providers.get(data.profile.providerId).skens || data.profile.meter == "demo") return SubmissionDecision(false, null, "자동 연결한 SK E&S 공급사 계정에서만 사용할 수 있어요.")
         if (automatic && !Providers.get(data.profile.providerId).automaticSubmission) return SubmissionDecision(false, null, "이 공급사는 직접 확인 입력만 지원해요.")
@@ -91,7 +97,7 @@ object SubmissionPolicy {
         val latest = data.observations.lastOrNull { it.meter == data.profile.meter }
             ?: return SubmissionDecision(false, null, "실제 계량기 숫자를 먼저 확인해 주세요.")
         val age = ((time - latest.time) / 86_400_000).coerceAtLeast(0)
-        if (settings.requireRecentCheck && age > settings.recentDays) {
+        if (automatic && settings.requireRecentCheck && age > settings.recentDays) {
             return SubmissionDecision(false, null, "마지막 실측 확인이 ${age}일 전이에요. ${settings.recentDays}일 이내에 다시 확인해 주세요.")
         }
         val estimated = Estimator.estimate(data, time).reading
@@ -219,6 +225,14 @@ data class MonthlyHistory(
 )
 
 object HistorySummary {
+    fun months(data: AppData, latest: YearMonth, count: Int = 24): List<MonthlyHistory> {
+        val bills = data.gasappBills.associateBy { YearMonth.parse(it.month) }
+        return months(data.periods, latest, count).map { month ->
+            val bill = bills[month.month]
+            month.copy(usage = bill?.usage ?: month.usage, billedAmount = bill?.amount ?: month.billedAmount)
+        }
+    }
+
     fun months(periods: List<UsagePeriod>, latest: YearMonth, count: Int = 24): List<MonthlyHistory> {
         require(count in 1..120)
         return (count downTo 1).map { offset ->

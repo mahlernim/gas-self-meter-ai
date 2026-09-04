@@ -14,110 +14,162 @@ import java.time.Duration
 import java.time.ZonedDateTime
 import java.util.concurrent.TimeUnit
 
+private inline fun <reified T : ListenableWorker> daily(context: Context, name: String, enabled: Boolean, hour: Int, minute: Int = 0, network: Boolean = false) {
+    val manager = WorkManager.getInstance(context)
+    if (!enabled) { manager.cancelUniqueWork(name); return }
+    val now = ZonedDateTime.now(Korea)
+    var next = now.withHour(hour).withMinute(minute).withSecond(0).withNano(0)
+    if (next <= now) next = next.plusDays(1)
+    val request = PeriodicWorkRequestBuilder<T>(24, TimeUnit.HOURS)
+        .setInitialDelay(Duration.between(now, next).toMillis(), TimeUnit.MILLISECONDS)
+        .setConstraints(Constraints.Builder().apply { if (network) setRequiredNetworkType(NetworkType.CONNECTED) }.build()).build()
+    val preferences = context.getSharedPreferences("work-schedules", Context.MODE_PRIVATE)
+    val signature = "$hour/$minute"
+    val policy = if (preferences.getString(name, null) == signature) ExistingPeriodicWorkPolicy.KEEP else ExistingPeriodicWorkPolicy.CANCEL_AND_REENQUEUE
+    manager.enqueueUniquePeriodicWork(name, policy, request)
+    preferences.edit().putString(name, signature).apply()
+}
+
 object Reminders {
     const val CHANNEL = "weekly-meter-check"
     fun schedule(context: Context, profile: Profile) {
-        val manager = WorkManager.getInstance(context)
-        manager.cancelUniqueWork("weekly-meter-check")
-        if (!profile.reminder) {
-            context.getSystemService(NotificationManager::class.java).cancel(1)
-            return
-        }
-        val now = ZonedDateTime.now(Korea)
-        var next = now.withHour(profile.reminderHour).withMinute(0).withSecond(0).withNano(0)
-        while (next <= now || next.dayOfWeek.value != profile.reminderDay) next = next.plusDays(1)
-        val work = PeriodicWorkRequestBuilder<ReminderWorker>(7, TimeUnit.DAYS)
-            .setInitialDelay(Duration.between(now, next).toMillis(), TimeUnit.MILLISECONDS).build()
-        manager.enqueueUniquePeriodicWork("weekly-meter-check", ExistingPeriodicWorkPolicy.CANCEL_AND_REENQUEUE, work)
+        WorkManager.getInstance(context).cancelUniqueWork("weekly-meter-check")
+        daily<ReminderWorker>(context, "calibration-daily-check", profile.reminder, profile.reminderHour)
+        context.getSystemService(NotificationManager::class.java).cancel(1)
     }
 }
 
 object SubmissionScheduler {
-    private const val WORK = "meter-auto-submit"
     const val CHANNEL = "meter-submission"
     fun schedule(context: Context, data: AppData) {
-        val manager = WorkManager.getInstance(context)
-        manager.cancelUniqueWork(WORK)
-        manager.cancelUniqueWork("$WORK-now")
-        if (!data.submissionSettings.enabled || !data.submissionSettings.automatic || data.credentials == null ||
-            !Providers.get(data.profile.providerId).automaticSubmission) return
-        val now = ZonedDateTime.now(Korea)
-        var next = now.withHour(10).withMinute(0).withSecond(0).withNano(0)
-        if (next <= now) next = next.plusDays(1)
-        val work = PeriodicWorkRequestBuilder<SubmissionWorker>(24, TimeUnit.HOURS)
-            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
-            .setInitialDelay(Duration.between(now, next).toMillis(), TimeUnit.MILLISECONDS).build()
-        manager.enqueueUniquePeriodicWork(WORK, ExistingPeriodicWorkPolicy.CANCEL_AND_REENQUEUE, work)
-        val checkNow = OneTimeWorkRequestBuilder<SubmissionWorker>()
-            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()).build()
-        manager.enqueueUniqueWork("$WORK-now", ExistingWorkPolicy.REPLACE, checkNow)
+        val connected = data.ready && ((data.credentials != null && Providers.get(data.profile.providerId).skens) || data.gasappConnection != null)
+        WorkManager.getInstance(context).cancelUniqueWork("meter-auto-submit-now")
+        daily<SubmissionWorker>(context, "meter-auto-submit", connected && data.submissionSettings.automatic &&
+            Providers.get(data.profile.providerId).automaticSubmission, 10, network = true)
+        daily<SubmissionReminderWorker>(context, "meter-submission-reminder", connected && data.submissionSettings.reminder,
+            data.submissionSettings.reminderHour, data.submissionSettings.reminderMinute, network = true)
+        if (!data.submissionSettings.reminder) context.getSystemService(NotificationManager::class.java).cancel(3)
     }
+}
+
+internal fun notify(context: Context, id: Int, channel: String, channelName: String, title: String, text: String) {
+    if (Build.VERSION.SDK_INT >= 33 && context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
+    val manager = context.getSystemService(NotificationManager::class.java)
+    manager.createNotificationChannel(NotificationChannel(channel, channelName, NotificationManager.IMPORTANCE_DEFAULT))
+    val intent = PendingIntent.getActivity(context, id, Intent(context, MainActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+    manager.notify(id, NotificationCompat.Builder(context, channel).setSmallIcon(R.drawable.ic_meter).setContentTitle(title)
+        .setContentText(text).setStyle(NotificationCompat.BigTextStyle().bigText(text)).setContentIntent(intent)
+        .setAutoCancel(true).setVisibility(NotificationCompat.VISIBILITY_PRIVATE).build())
 }
 
 class SubmissionWorker(context: Context, params: WorkerParameters) : Worker(context, params) {
     override fun doWork(): Result {
-        if (!SubmissionGate.lock.tryLock()) return Result.success()
+        if (!SubmissionGate.lock.tryLock()) return Result.retry()
         try {
-        val store = SecureStore(applicationContext)
-        var data = try { store.read() } catch (_: Exception) { return Result.failure() }
-        val credentials = data.credentials ?: return Result.success()
-        if (!data.submissionSettings.enabled || !data.submissionSettings.automatic) return Result.success()
-        var pending: SubmissionRecord? = null
-        val detail = try {
-            val provider = Providers.skens(data.profile.providerId)
-            SkensClient(provider, credentials).use { client ->
-                val contract = client.login().find { SkensClient.contractKey(provider, it) == data.profile.contract }
-                    ?: return Result.success()
-                val target = client.selfReadTarget(contract)
-                val decision = SubmissionPolicy.decide(data, target, System.currentTimeMillis(), automatic = true)
-                if (!decision.allowed || decision.value == null) return Result.success()
-                pending = SubmissionRecord(target.cycle, target.start, target.end, decision.value, System.currentTimeMillis(), "pending", "자동 입력 결과 확인 대기")
-                data = data.copy(submissions = (data.submissions.filterNot { it.cycle == target.cycle } + pending!!).takeLast(100))
-                store.write(data)
-                val outcome = client.submitReading(target, decision.value)
-                val status = when { !outcome.accepted -> "rejected"; outcome.confirmed -> "confirmed"; else -> "uncertain" }
-                when (status) {
-                    "confirmed" -> "검침값 ${decision.value} m³ 자동 입력을 완료했어요."
-                    "rejected" -> "공급사가 자동 입력을 받지 않았어요. 직접 확인해 주세요."
-                    else -> "자동 입력 결과를 확정하지 못했어요. 다시 보내지 않았습니다."
-                }.also { message -> replace(store, data, pending!!.copy(status = status, detail = message)) }
+            val store = SecureStore(applicationContext)
+            var data = try { store.read() } catch (_: Exception) { return Result.failure() }
+            if (data.gasappConnection != null) return GasappBackground.automatic(applicationContext, this)
+            val expected = data
+            val credentials = data.credentials ?: return Result.success()
+            if (!data.submissionSettings.automatic || !Providers.get(data.profile.providerId).automaticSubmission) return Result.success()
+            var pending: SubmissionRecord? = null
+            var target: SelfReadTarget? = data.cachedSelfRead
+            var text: String? = null
+            try {
+                val provider = Providers.skens(data.profile.providerId)
+                SkensClient(provider, credentials).use { client ->
+                    val contract = client.login().find { SkensClient.contractKey(provider, it) == data.profile.contract } ?: return Result.success()
+                    target = client.selfReadTarget(contract)
+                    data = store.update { latest -> if (BackgroundState.sameAccount(latest, expected)) latest.copy(cachedSelfRead = target) else latest }
+                    if (!BackgroundState.sameAccount(data, expected) || !data.submissionSettings.automatic) return Result.success()
+                    val current = target!!
+                    val decision = SubmissionPolicy.decide(data, current, System.currentTimeMillis(), automatic = true)
+                    if (current.submitted) { applicationContext.getSystemService(NotificationManager::class.java).cancel(3); return Result.success() }
+                    if (dateOf(System.currentTimeMillis()).toString() != current.end) return Result.success()
+                    if (!decision.allowed || decision.value == null) {
+                        text = ReminderPolicy.submissionText(data, current, System.currentTimeMillis(), failed = true)
+                    } else {
+                        pending = SubmissionRecord(current.cycle, current.start, current.end, decision.value, System.currentTimeMillis(), "pending", "자동 제출 결과 확인 대기")
+                        data = store.update { latest ->
+                            val latestDecision = SubmissionPolicy.decide(latest, current, System.currentTimeMillis(), automatic = true)
+                            if (isStopped || !BackgroundState.sameAccount(latest, expected) || !latestDecision.allowed || latestDecision.value != decision.value) latest
+                            else latest.copy(submissions = (latest.submissions.filterNot { it.cycle == current.cycle } + pending!!).takeLast(100))
+                        }
+                        if (data.submissions.none { it == pending } || !BackgroundState.sameAccount(data, expected)) {
+                            pending = null
+                            return Result.success()
+                        }
+                        // Recheck cancellation and consent at the boundary where the request becomes in flight.
+                        val beforeSend = store.read()
+                        if (isStopped || !BackgroundState.sameAccount(beforeSend, expected) || !beforeSend.submissionSettings.automatic) {
+                            store.update { latest ->
+                                if (BackgroundState.sameAccount(latest, expected)) latest.copy(submissions = latest.submissions.filterNot { it == pending }) else latest
+                            }
+                            pending = null
+                            return Result.success()
+                        }
+                        val outcome = client.submitReading(current, decision.value)
+                        val status = when { !outcome.accepted -> "rejected"; outcome.confirmed -> "confirmed"; else -> "uncertain" }
+                        text = when (status) {
+                            "confirmed" -> "검침값 ${decision.value} m³ 자동 제출을 완료했어요."
+                            "rejected" -> ReminderPolicy.DEADLINE
+                            else -> ReminderPolicy.UNCERTAIN
+                        }
+                        store.update { BackgroundState.finish(it, expected, pending!!.copy(status = status, detail = text!!)) }
+                        if (status == "confirmed") applicationContext.getSystemService(NotificationManager::class.java).cancel(3)
+                    }
+                }
+            } catch (_: Exception) {
+                if (pending != null) {
+                    store.update { BackgroundState.finish(it, expected, pending!!.copy(status = "uncertain", detail = ReminderPolicy.UNCERTAIN)) }
+                    text = ReminderPolicy.UNCERTAIN
+                } else if (target?.end == today().toString()) {
+                    text = ReminderPolicy.submissionText(data, target, System.currentTimeMillis(), failed = true)
+                }
             }
-        } catch (_: Exception) {
-            pending?.let { replace(store, data, it.copy(status = "uncertain", detail = "자동 입력 결과를 확정하지 못했어요. 다시 보내지 않았습니다.")) }
-            if (pending == null) return Result.success()
-            "자동 입력 결과를 확정하지 못했어요. 공급사 홈페이지에서 확인해 주세요."
-        }
-        notify(detail)
-        return Result.success()
+            if (BackgroundState.sameAccount(store.read(), expected)) text?.let { notify(applicationContext, 2, SubmissionScheduler.CHANNEL, "자가검침 제출 안내", "똑똑 자가검침 AI", it) }
+            return Result.success()
         } finally { SubmissionGate.lock.unlock() }
     }
-    private fun replace(store: SecureStore, data: AppData, record: SubmissionRecord) {
-        store.write(data.copy(submissions = (data.submissions.filterNot { it.cycle == record.cycle } + record).takeLast(100)))
-    }
-    private fun notify(text: String) {
-        if (Build.VERSION.SDK_INT >= 33 && applicationContext.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
-        val manager = applicationContext.getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(NotificationChannel(SubmissionScheduler.CHANNEL, "검침값 자동 입력 결과", NotificationManager.IMPORTANCE_DEFAULT))
-        val pendingIntent = PendingIntent.getActivity(applicationContext, 2, Intent(applicationContext, MainActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        manager.notify(2, NotificationCompat.Builder(applicationContext, SubmissionScheduler.CHANNEL)
-            .setSmallIcon(R.drawable.ic_meter).setContentTitle("똑똑 자가검침 AI")
-            .setContentText(text).setStyle(NotificationCompat.BigTextStyle().bigText(text))
-            .setContentIntent(pendingIntent).setAutoCancel(true).setVisibility(NotificationCompat.VISIBILITY_PRIVATE).build())
+
+}
+
+class SubmissionReminderWorker(context: Context, params: WorkerParameters) : Worker(context, params) {
+    override fun doWork(): Result {
+        if (!SubmissionGate.lock.tryLock()) return Result.retry()
+        try {
+            val store = SecureStore(applicationContext)
+            var data = store.read()
+            if (!data.submissionSettings.reminder) return Result.success()
+            if (data.gasappConnection != null) return GasappBackground.remind(applicationContext)
+            val expected = data
+            val credentials = data.credentials ?: return Result.success()
+            val provider = Providers.skens(data.profile.providerId)
+            // Always query the supplier before reminding, including submissions made outside this app.
+            val target = SkensClient(provider, credentials).use { client ->
+                val contract = client.login().find { SkensClient.contractKey(provider, it) == data.profile.contract } ?: return Result.success()
+                client.selfReadTarget(contract)
+            }
+            data = store.update { latest -> if (BackgroundState.sameAccount(latest, expected)) latest.copy(cachedSelfRead = target) else latest }
+            if (!BackgroundState.sameAccount(data, expected) || !data.submissionSettings.reminder || data.cachedSelfRead != target) return Result.success()
+            val text = ReminderPolicy.submissionText(data, target, System.currentTimeMillis())
+            if (text != null) notify(applicationContext, 3, SubmissionScheduler.CHANNEL, "자가검침 제출 안내", "똑똑 자가검침 AI", text)
+            else applicationContext.getSystemService(NotificationManager::class.java).cancel(3)
+            return Result.success()
+        } catch (_: Exception) { return Result.retry() }
+        finally { SubmissionGate.lock.unlock() }
     }
 }
 
 class ReminderWorker(context: Context, params: WorkerParameters) : Worker(context, params) {
     override fun doWork(): Result {
         val data = try { SecureStore(applicationContext).read() } catch (_: Exception) { return Result.failure() }
-        if (!data.ready || !data.profile.reminder) return Result.success()
-        if (Build.VERSION.SDK_INT >= 33 && applicationContext.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return Result.success()
-        val manager = applicationContext.getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(NotificationChannel(Reminders.CHANNEL, "계량기 실측 확인 알림", NotificationManager.IMPORTANCE_DEFAULT))
-        val pending = PendingIntent.getActivity(applicationContext, 1, Intent(applicationContext, MainActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        manager.notify(1, NotificationCompat.Builder(applicationContext, Reminders.CHANNEL)
-            .setSmallIcon(R.drawable.ic_meter).setContentTitle("똑똑, 계량기를 확인할 시간이에요")
-            .setContentText("계량기의 실제 숫자를 입력하면 이번 주 추정이 더 정확해져요.")
-            .setContentIntent(pending).setAutoCancel(true).setVisibility(NotificationCompat.VISIBILITY_PRIVATE).build())
+        if (ReminderPolicy.calibrationDue(data, System.currentTimeMillis())) notify(applicationContext, 1, Reminders.CHANNEL,
+            "보정 알림", "똑똑, 계량기를 확인할 시간이에요", "계량기를 보고 보정해 주세요. 실제 숫자를 입력하면 추정이 더 정확해져요.")
         return Result.success()
     }
 }
+
+
+
+

@@ -3,6 +3,8 @@ package dev.mahlernim.gasselfmeter
 import android.Manifest
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -14,8 +16,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -43,11 +45,17 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.delay
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -87,6 +95,13 @@ class MainActivity : ComponentActivity() {
 
 @Composable fun GasApp(vm: GasViewModel = viewModel()) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, vm) {
+        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_RESUME) vm.onForeground() }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) vm.onForeground()
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     val snackbar = remember { SnackbarHostState() }
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var calibration by remember { mutableStateOf<String?>(null) }
@@ -95,6 +110,8 @@ class MainActivity : ComponentActivity() {
     var confirmation by remember { mutableStateOf<String?>(null) }
     var restoreRaw by remember { mutableStateOf<String?>(null) }
     var licenses by remember { mutableStateOf(false) }
+    var refreshConfirmation by remember { mutableStateOf(false) }
+    var notificationPurpose by remember { mutableStateOf("calibration") }
     var submitValue by remember { mutableStateOf<Double?>(null) }
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) { while (true) { now = System.currentTimeMillis(); delay(30_000) } }
@@ -115,7 +132,8 @@ class MainActivity : ComponentActivity() {
         }
     }
     val notification = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        vm.setReminder(granted, vm.data.profile.reminderDay, vm.data.profile.reminderHour)
+        if (notificationPurpose == "submission") vm.setSubmissionSettings(vm.data.submissionSettings.copy(reminder = granted))
+        else vm.setReminder(granted, vm.data.profile.reminderDay, vm.data.profile.reminderHour)
         if (!granted) vm.message = "알림 권한이 꺼져 있어요. 기기 설정에서 허용할 수 있어요."
     }
     fun open(url: String) = vm.attempt { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
@@ -130,7 +148,7 @@ class MainActivity : ComponentActivity() {
     Scaffold(containerColor = Paper, snackbarHost = { SnackbarHost(snackbar) },
         bottomBar = { if (data.ready && !vm.storageError) NavigationBar(containerColor = Color.White) {
             listOf("검침" to Icons.Outlined.Speed, "제출" to Icons.Outlined.CloudUpload,
-                "기록" to Icons.Outlined.BarChart, "설정" to Icons.Outlined.Settings).forEachIndexed { index, item ->
+                "추이" to Icons.Outlined.BarChart, "설정" to Icons.Outlined.Settings).forEachIndexed { index, item ->
                 NavigationBarItem(selected = tab == index, onClick = { tab = index }, icon = { Icon(item.second, null) }, label = { Text(item.first) })
             }
         } }
@@ -150,27 +168,46 @@ class MainActivity : ComponentActivity() {
             } else if (!data.ready) {
                 Welcome(vm.busy, { vm.manual(it) }, { loginProviderId = it }, { vm.loadDemo() }, { importer.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) }, ::open)
             } else when (tab) {
-                0 -> Dashboard(data, estimate, now, { calibration = decimalText(estimate.reading).takeIf { estimate.reading != null } ?: "" }, { tab = 2 }, { vm.refresh() }, vm.busy)
-                1 -> SubmissionPage(data, vm.selfReadTarget, now, vm.busy, vm::checkSubmissionStatus, { value -> submitValue = value }, vm::setSubmissionSettings)
+                0 -> Dashboard(data, estimate, now, { calibration = decimalText(estimate.reading).takeIf { estimate.reading != null } ?: "" }, { tab = 2 }, { refreshConfirmation = true }, {
+                    (context.getSystemService(ClipboardManager::class.java)).setPrimaryClip(ClipData.newPlainText("계약자번호", data.profile.customerNumber))
+                    vm.message = "계약자번호 복사됨"
+                }, vm.busy)
+                1 -> SubmissionPage(data, vm.selfReadTarget, now, vm.busy, vm::checkSubmissionStatus, { value -> submitValue = value }, { settings ->
+                    if (settings.reminder && !data.submissionSettings.reminder && Build.VERSION.SDK_INT >= 33) {
+                        vm.setSubmissionSettings(settings.copy(reminder = false))
+                        notificationPurpose = "submission"
+                        notification.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    } else vm.setSubmissionSettings(settings)
+                })
                 2 -> HistoryPage(data, { addHistory = true }, { period -> confirmation = "period:${data.periods.indexOf(period)}" }, { observation -> confirmation = "observation:${observation.time}" })
                 3 -> SettingsPage(data, {
+                    notificationPurpose = "calibration"
                     if (Build.VERSION.SDK_INT >= 33) notification.launch(Manifest.permission.POST_NOTIFICATIONS)
                     else vm.setReminder(true, data.profile.reminderDay, data.profile.reminderHour)
                 }, { vm.setReminder(false, data.profile.reminderDay, data.profile.reminderHour) },
-                    { day, hour -> vm.setReminder(data.profile.reminder, day, hour) },
+                    { day, hour -> vm.setReminder(data.profile.reminder, day, hour) }, vm::setReminderRepeatCount,
                     { loginProviderId = data.profile.providerId }, { vm.forgetCredentials() },
                     { export.launch("gas-self-meter-${today()}.json") }, { importer.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) },
                     { confirmation = "meter" }, { confirmation = "erase" }, ::openUpdate, { licenses = true }, ::open, vm.busy)
             }
         }
     }
+    if (refreshConfirmation) AlertDialog(onDismissRequest = { refreshConfirmation = false },
+        title = { Text("공급사 정보 갱신") },
+        text = { Text("${Providers.get(data.profile.providerId).name}에 로그인해 청구 이력, 계량기 정보, 검침 기간과 제출 상태를 갱신합니다.\n\n정보는 하루 한 번 자동으로 갱신중입니다. 새 청구서나 변경 사항을 지금 확인하려면 실행해주세요.") },
+        confirmButton = { TextButton(onClick = { refreshConfirmation = false; vm.refresh() }) { Text("갱신 실행") } },
+        dismissButton = { TextButton(onClick = { refreshConfirmation = false }) { Text("취소") } })
     calibration?.let { initial -> CalibrationDialog(initial, estimate, data, { calibration = null }) { value ->
         if (vm.calibrate(value)) calibration = null
     } }
     submitValue?.let { value ->
+        val provider = Providers.get(data.profile.providerId)
+        val valueText = decimalText(value, if (provider.gasapp) 0 else 1)
         AlertDialog(onDismissRequest = { submitValue = null }, title = { Text("검침값을 공급사에 입력할까요?") },
-            text = { Text("${Providers.get(data.profile.providerId).name}에 ${decimalText(value)} m³를 입력합니다. 전송 직전에 기간과 기존 제출 여부를 다시 확인하며, 결과가 불확실하면 자동으로 다시 보내지 않습니다.") },
-            confirmButton = { TextButton(onClick = { vm.submitReading(value); submitValue = null }) { Text("${decimalText(value)} m³ 입력") } },
+            text = { Text("${provider.name}에 $valueText m³를 입력합니다." +
+                (if (provider.gasapp) "\n\n가스앱은 소수점 아래를 제외한 정수 지침을 제출해요." else "") +
+                "\n\n전송 직전에 기간과 기존 제출 여부를 다시 확인하며, 결과가 불확실하면 자동으로 다시 보내지 않습니다.") },
+            confirmButton = { TextButton(onClick = { vm.submitReading(value); submitValue = null }) { Text("$valueText m³ 입력") } },
             dismissButton = { TextButton(onClick = { submitValue = null }) { Text("취소") } })
     }
     if (addHistory) HistoryDialog({ addHistory = false }) { start, end, value ->
@@ -178,7 +215,16 @@ class MainActivity : ComponentActivity() {
         if (vm.message == "사용 이력을 저장했어요.") addHistory = false
     }
     loginProviderId?.let { providerId ->
-        LoginDialog(Providers.skens(providerId), vm.busy, vm.progress, vm.progressCurrent, vm.progressTotal, vm.contracts, vm.loginError,
+        if (Providers.get(providerId).gasapp) {
+            Dialog(onDismissRequest = {}, properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false, usePlatformDefaultWidth = false)) {
+                Surface(Modifier.fillMaxWidth().padding(16.dp).heightIn(max = 640.dp), shape = RoundedCornerShape(24.dp), color = Paper) {
+                    GasappConnectScreen(providerId, { session, account ->
+                        loginProviderId = null
+                        vm.connectGasapp(session, account)
+                    }, { loginProviderId = null })
+                }
+            }
+        } else LoginDialog(Providers.skens(providerId), vm.busy, vm.progress, vm.progressCurrent, vm.progressTotal, vm.contracts, vm.loginError,
             { if (!vm.busy) { loginProviderId = null; vm.cancelLogin() } },
             { u, p, remember -> vm.login(providerId, u, p, remember) }, { vm.selectContract(it) }, ::open)
     }
@@ -285,7 +331,7 @@ class MainActivity : ComponentActivity() {
             Choice("도시가스 공급사", Providers.get(providerId).name, providers.map { it.name }) { name -> providerId = providers.first { it.name == name }.id }
             val provider = Providers.get(providerId)
             if (provider.automatic) {
-                Hint(Icons.Outlined.CloudDownload, "${provider.name} 계정으로 청구 이력을 가져올 수 있어요.")
+                Hint(Icons.Outlined.CloudDownload, if (provider.gasapp) "가스앱 본인인증으로 ${provider.name} 사용 계약과 청구 이력을 가져와요." else "${provider.name} 계정으로 청구 이력을 가져올 수 있어요.")
                 ActionButton("${provider.name} 연결하기", Icons.Outlined.Login, !busy) { onLogin(providerId) }
                 TextButton(onClick = { onManual(providerId) }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("로그인 없이 직접 시작") }
             } else {
@@ -296,7 +342,7 @@ class MainActivity : ComponentActivity() {
             }
         }
         Hint(Icons.Outlined.Lock, "로그인 정보와 사용 기록은 기기에 암호화해 보관해요. 별도 서버나 광고·분석 도구를 사용하지 않아요.")
-        Text("‘맞음’은 계량기를 실제로 보고 확인하는 버튼이에요. 공급사에 검침을 제출하는 기능은 없어요.", color = Muted, style = MaterialTheme.typography.bodySmall)
+        Text("계량기 보고 보정하기는 실측값을 저장해요. 공급사 제출은 제출 탭에서 진행해요.", color = Muted, style = MaterialTheme.typography.bodySmall)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
             TextButton(onClick = onDemo, enabled = !busy) { Text("예시로 둘러보기") }
             TextButton(onClick = onImport, enabled = !busy) { Text("백업 가져오기") }
@@ -304,32 +350,36 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@Composable private fun Dashboard(data: AppData, estimate: Estimate, now: Long, onCheck: () -> Unit, onHistory: () -> Unit, onRefresh: () -> Unit, busy: Boolean) {
+@Composable private fun Dashboard(data: AppData, estimate: Estimate, now: Long, onCheck: () -> Unit, onHistory: () -> Unit, onRefresh: () -> Unit, copyCustomerNumber: () -> Unit, busy: Boolean) {
     val provider = Providers.get(data.profile.providerId)
     val latest = data.periods.filter { it.meter == data.profile.meter && it.current != null && dayStart(it.last.plusDays(1)) <= now }.maxByOrNull { it.end }
     val usage = if (latest?.current != null && estimate.reading != null) (estimate.reading - latest.current).takeIf { it >= 0 } else null
     val cost = if (usage != null && latest?.unitCost != null) usage * latest.unitCost + (latest.baseCost ?: 0.0) else null
     Page {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Column { Text("똑똑", fontWeight = FontWeight.ExtraBold, fontSize = 26.sp); Text("${today().format(DateTimeFormatter.ofPattern("M월 d일 EEEE", Locale.KOREAN))}", color = Muted, style = MaterialTheme.typography.bodySmall) }
+            Column(Modifier.weight(1f)) { Text("똑똑 자가검침 AI", fontWeight = FontWeight.ExtraBold, fontSize = 24.sp); Text("${today().format(DateTimeFormatter.ofPattern("M월 d일 EEEE", Locale.KOREAN))}", color = Muted, style = MaterialTheme.typography.bodySmall) }
             Image(painterResource(R.drawable.app_icon), "똑똑 앱 아이콘", Modifier.size(48.dp).clip(CircleShape))
         }
         if (data.profile.meter == "demo") Badge("예시 데이터 · 실제 우리 집 기록이 아니에요", Color(0xFFFFE5D9))
-        Text(provider.name, color = Muted, style = MaterialTheme.typography.labelLarge)
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(provider.name, color = Muted, style = MaterialTheme.typography.labelLarge)
+            Spacer(Modifier.weight(1f))
+            if (data.profile.customerNumber.isNotBlank()) {
+                Text(data.profile.customerNumber, style = MaterialTheme.typography.labelLarge)
+                IconButton(onClick = copyCustomerNumber, modifier = Modifier.size(40.dp)) { Icon(Icons.Outlined.ContentCopy, "계약자번호 복사", Modifier.size(18.dp)) }
+            }
+        }
         Card(shape = RoundedCornerShape(28.dp), colors = CardDefaults.cardColors(containerColor = DeepTeal), modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("지금 계량기는 아마", color = Color(0xFFC1E1D9), style = MaterialTheme.typography.titleMedium)
+            Column(Modifier.fillMaxWidth().padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Text("AI 추정 지침", color = Color(0xFFC1E1D9), style = MaterialTheme.typography.titleMedium)
                 if (estimate.reading != null) {
-                    Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(decimalText(estimate.reading), Modifier.weight(1f, false), fontSize = 38.sp, fontWeight = FontWeight.Bold, color = Color.White, lineHeight = 44.sp)
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.Center) {
+                        Text(decimalText(estimate.reading), Modifier.weight(1f, false), fontSize = 42.sp, fontWeight = FontWeight.Bold, color = Color.White, lineHeight = 44.sp)
                         Text("m³", color = Color(0xFFC1E1D9), modifier = Modifier.padding(bottom = 6.dp))
                     }
-                    Text("누적 지침 추정 · 실제 검침값이 아니에요", color = Color(0xFFC1E1D9), style = MaterialTheme.typography.bodySmall)
                 } else Text(if (estimate.ageDays == null) "숫자를 한 번\n알려주세요" else "추정에 필요한\n이력을 모아요", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
-                HorizontalDivider(color = Color(0xFF32636A))
-                Text(estimate.source, color = Color(0xFFC1E1D9), style = MaterialTheme.typography.bodySmall)
                 Button(onClick = onCheck, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp), colors = ButtonDefaults.buttonColors(containerColor = Coral, contentColor = DeepTeal), shape = RoundedCornerShape(14.dp)) {
-                    Icon(Icons.Outlined.FactCheck, null); Spacer(Modifier.width(8.dp)); Text("계량기 보고 확인하기", fontWeight = FontWeight.Bold)
+                    Icon(Icons.Outlined.FactCheck, null); Spacer(Modifier.width(8.dp)); Text("계량기 보고 보정하기", fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -348,16 +398,19 @@ class MainActivity : ComponentActivity() {
             }
             if (cost != null) {
                 HorizontalDivider(color = Pale)
-                Text("현재까지 참고 요금 약 ${decimalText(cost, 0)}원", fontWeight = FontWeight.Medium)
+                Text("현재까지 추정 요금 ${decimalText(cost, 0)}원", fontWeight = FontWeight.Medium)
                 Text("최근 청구서의 단가·기본료·부가세를 적용한 참고값이에요. 요금 변경, 할인, 정산에 따라 실제 청구액과 달라져요.", color = Muted, style = MaterialTheme.typography.bodySmall)
             } else if (latest == null) Text("기간별 지침이 있는 청구 이력을 연결하면 이번 기간 사용량도 보여드려요.", color = Muted, style = MaterialTheme.typography.bodySmall)
         }
-        val planned = data.profile.plannedDate?.let(LocalDate::parse)?.takeIf { it > today() && it <= today().plusDays(45) }
+        val planned = data.profile.plannedDate?.let(LocalDate::parse)?.takeIf { it >= today() && it <= today().plusDays(45) }
         if (planned != null) {
             val future = Estimator.estimate(data, dayStart(planned), now)
             SurfaceCard {
-                Text("다음 검침일 ${planned.monthValue}월 ${planned.dayOfMonth}일", fontWeight = FontWeight.Bold)
+                Text("당월 검침일 ${planned.monthValue}월 ${planned.dayOfMonth}일(${ChronoUnit.DAYS.between(today(), planned)}일 남았어요)", fontWeight = FontWeight.Bold)
                 Text(if (future.reading != null) "예상 누적 지침 ${decimalText(future.reading)} m³" else "현재 정보로 다음 지침을 추정하기 어려워요.", color = Muted)
+                val futureUsage = if (latest?.current != null && future.reading != null) (future.reading - latest.current).takeIf { it >= 0 } else null
+                val futureCost = if (futureUsage != null && latest?.unitCost != null) futureUsage * latest.unitCost + (latest.baseCost ?: 0.0) else null
+                if (futureCost != null) Text("예상 당월 요금 ${decimalText(futureCost, 0)}원", fontWeight = FontWeight.SemiBold)
             }
         }
         Hint(Icons.Outlined.EventAvailable, when {
@@ -365,20 +418,27 @@ class MainActivity : ComponentActivity() {
             estimate.ageDays >= 7 -> "최근 확인 기준 ${estimate.ageDays}일이 지났어요. 이번 주 숫자를 확인해 주세요."
             else -> "최근 확인 기준 ${estimate.ageDays}일 전. 일주일에 한 번 실제 숫자를 알려주세요."
         })
-        TextButton(onClick = onHistory, modifier = Modifier.fillMaxWidth()) { Text("사용 흐름과 지난 기록 보기"); Icon(Icons.Outlined.ChevronRight, null) }
+        TextButton(onClick = onHistory, modifier = Modifier.fillMaxWidth()) { Text("사용 추이 보기"); Icon(Icons.Outlined.ChevronRight, null) }
         if (data.profile.syncTime != null) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             Text("최근 조회 ${dateOf(data.profile.syncTime)}", style = MaterialTheme.typography.bodySmall, color = Muted)
-            TextButton(onClick = onRefresh, enabled = !busy) { Icon(Icons.Outlined.Refresh, null, Modifier.size(18.dp)); Text("새로고침") }
+            TextButton(onClick = onRefresh, enabled = !busy) { Icon(Icons.Outlined.Refresh, null, Modifier.size(18.dp)); Text("공급사 정보 갱신") }
         }
     }
 }
 
 @Composable private fun SubmissionPage(data: AppData, target: SelfReadTarget?, now: Long, busy: Boolean,
     refresh: () -> Unit, submit: (Double) -> Unit,
-    changeSettings: (Boolean, Boolean, Boolean, Int) -> Unit) {
+    changeSettings: (SubmissionSettings) -> Unit) {
     val settings = data.submissionSettings
-    val decision = SubmissionPolicy.decide(data, target, now, automatic = false)
     val provider = Providers.get(data.profile.providerId)
+    val gasappTarget = data.cachedGasappTarget
+    val decision = if (provider.gasapp) GasappSubmissionPolicy.decide(data, gasappTarget, now, automatic = false)
+        else SubmissionPolicy.decide(data, target, now, automatic = false)
+    val hasTarget = if (provider.gasapp) gasappTarget != null else target != null
+    val periodStart = if (provider.gasapp) gasappTarget?.start else target?.start
+    val periodEnd = if (provider.gasapp) gasappTarget?.end else target?.end
+    val submitted = if (provider.gasapp) gasappTarget?.submitted == true else target?.submitted == true
+    val submittedValue = if (provider.gasapp) gasappTarget?.submittedValue else target?.submittedValue
     val demo = data.profile.meter == "demo"
     val demoDate = dateOf(now)
     val demoValue = Estimator.estimate(data, now).reading?.let { kotlin.math.round(it * 10.0) / 10.0 }
@@ -386,51 +446,19 @@ class MainActivity : ComponentActivity() {
         Title("자가검침 제출", "기간과 숫자를 확인해 직접 제출하거나, 조건을 정해 마지막 날 자동으로 제출해요.")
         if (demo) Badge("예시 데이터 · 실제로 제출되지 않아요")
         SurfaceCard {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("공급사 제출 기능", fontWeight = FontWeight.Bold)
-                    Text("확인한 누적 지침을 실제 공급사 기록에 입력해요", color = Muted, style = MaterialTheme.typography.bodySmall)
-                }
-                Switch(checked = settings.enabled, onCheckedChange = { changeSettings(it, settings.automatic, settings.requireRecentCheck, settings.recentDays) })
-            }
-            if (settings.enabled) {
-                HorizontalDivider()
-                if (provider.automaticSubmission) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text("검침 기간 마지막 날 자동 제출", fontWeight = FontWeight.Medium)
-                            Text("당일 최신 상태를 다시 확인한 뒤 한 번만 전송해요", color = Muted, style = MaterialTheme.typography.bodySmall)
-                        }
-                        Switch(checked = settings.automatic, onCheckedChange = { changeSettings(true, it, settings.requireRecentCheck, settings.recentDays) })
-                    }
-                } else Text("이 공급사는 사용자가 값을 확인하는 직접 제출만 지원해요.", color = Muted, style = MaterialTheme.typography.bodySmall)
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("최근 실측이 있을 때만", fontWeight = FontWeight.Medium)
-                        Text("추정값이 오래된 실측에 기대지 않도록 제한해요", color = Muted, style = MaterialTheme.typography.bodySmall)
-                    }
-                    Switch(checked = settings.requireRecentCheck, onCheckedChange = { changeSettings(true, settings.automatic, it, settings.recentDays) })
-                }
-                if (settings.requireRecentCheck) Choice("허용 기간", "${settings.recentDays}일 이내", (1..30).map { "${it}일 이내" }) {
-                    changeSettings(true, settings.automatic, true, it.substringBefore("일").toInt())
-                }
-                if (settings.automatic && data.credentials == null && !demo) Text("자동 제출을 사용하려면 설정에서 로그인 정보를 암호화해 저장해야 해요.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-            }
-        }
-        SurfaceCard {
-            Text("이번 제출 상태", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+            Text("당월지침 제출", fontWeight = FontWeight.Bold, fontSize = 18.sp)
             if (demo) {
                 val month = YearMonth.from(demoDate)
                 Text("${month.atDay(20)} ~ ${month.atDay(25)}", color = Muted, style = MaterialTheme.typography.bodySmall)
                 Text(demoValue?.let { "입력 예정 ${decimalText(it)} m³" } ?: "입력할 숫자를 계산하는 중", fontSize = 28.sp, fontWeight = FontWeight.Bold)
                 Text("최근 실측 7일 전 · 기존 제출 없음", color = Muted, style = MaterialTheme.typography.bodySmall)
                 ActionButton(demoValue?.let { "${decimalText(it)} m³ 직접 제출" } ?: "직접 제출", Icons.Outlined.CloudUpload, false) {}
-            } else if (target == null) {
+            } else if (!hasTarget) {
                 Text("공급사에서 검침 기간을 확인해 주세요.", color = Muted)
             } else {
-                Text("${target.start} ~ ${target.end}", color = Muted, style = MaterialTheme.typography.bodySmall)
+                if (periodStart != null && periodEnd != null) Text("$periodStart ~ $periodEnd", color = Muted, style = MaterialTheme.typography.bodySmall)
                 when {
-                    target.submitted -> Text(target.submittedValue?.let { "입력 완료 · ${decimalText(it)} m³" } ?: "입력 완료", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Teal)
+                    submitted -> Text(submittedValue?.let { "입력 완료 · ${decimalText(it)} m³" } ?: "입력 완료", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Teal)
                     decision.value != null -> Text("입력 예정 ${decimalText(decision.value)} m³", fontSize = 28.sp, fontWeight = FontWeight.Bold)
                     else -> Text("아직 입력할 수 없어요", fontSize = 23.sp, fontWeight = FontWeight.Bold)
                 }
@@ -440,6 +468,31 @@ class MainActivity : ComponentActivity() {
                 ActionButton("검침 기간과 제출 상태 새로 확인", Icons.Outlined.Refresh, !busy, refresh)
                 if (decision.allowed && decision.value != null) ActionButton("${decimalText(decision.value)} m³ 직접 제출", Icons.Outlined.CloudUpload, !busy) { submit(decision.value) }
             }
+        }
+        SettingsSection("자가검침 자동제출") {
+            if (provider.automaticSubmission) {
+                SettingToggle("자가검침 자동제출", "기간내 제출을 깜빡하면 AI가 자동으로 대신 제출해요.", Icons.Outlined.AutoAwesome,
+                    settings.automatic) { changeSettings(settings.copy(automatic = it)) }
+                SettingToggle("최근 실측이 있을 때만", "보정한지 오래된 경우 자동제출하지 않아요.", Icons.Outlined.FactCheck,
+                    settings.requireRecentCheck) { changeSettings(settings.copy(requireRecentCheck = it)) }
+                if (settings.requireRecentCheck) SettingChoice("허용 기간", "${settings.recentDays}일 이내", Icons.Outlined.DateRange, (1..30).map { "${it}일 이내" }) {
+                    changeSettings(settings.copy(recentDays = it.substringBefore("일").toInt()))
+                }
+                if (settings.automatic && data.credentials == null && data.gasappConnection == null && !demo) Text("자동 제출을 사용하려면 설정에서 로그인 정보를 저장해 주세요.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            } else Text("이 공급사는 직접 제출만 지원해요.", color = Muted, modifier = Modifier.padding(12.dp))
+        }
+        SettingsSection("제출 알림") {
+            SettingToggle("제출 알림", "검침 기간 중 미제출 상태일 때 매일 알려드려요.", Icons.Outlined.NotificationsActive,
+                settings.reminder) { changeSettings(settings.copy(reminder = it)) }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(Modifier.weight(1f)) {
+                    Choice("시", "${settings.reminderHour}시", (0..23).map { "${it}시" }) { changeSettings(settings.copy(reminderHour = it.removeSuffix("시").toInt())) }
+                }
+                Column(Modifier.weight(1f)) {
+                    Choice("분", "${settings.reminderMinute}분", (0..59).map { "${it}분" }) { changeSettings(settings.copy(reminderMinute = it.removeSuffix("분").toInt())) }
+                }
+            }
+            Text("한국 시간 기준 · 공급사에서 제출 완료를 확인하면 알림을 멈춰요.", modifier = Modifier.padding(12.dp), color = Muted, style = MaterialTheme.typography.bodySmall)
         }
         Hint(Icons.Outlined.Security, "자동 제출은 마지막 날에만 실행됩니다. 공급사 상태, 이전 검침값, 최근 실측 시점과 중복 전송 기록을 확인하고 조건이 하나라도 맞지 않으면 보내지 않아요.")
         if (data.submissions.isNotEmpty()) Text("최근 입력 결과", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
@@ -454,29 +507,35 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable private fun HistoryPage(data: AppData, add: () -> Unit, delete: (UsagePeriod) -> Unit, deleteObservation: (Observation) -> Unit) {
-    val months = remember(data.periods) { HistorySummary.months(data.periods, YearMonth.from(today())) }
+    val months = remember(data.periods, data.gasappBills) { HistorySummary.months(data, YearMonth.from(today())).dropWhile { it.usage == null && it.billedAmount == null }.dropLastWhile { it.usage == null && it.billedAmount == null } }
     var selectedMonth by rememberSaveable { mutableStateOf<String?>(null) }
     val selected = months.find { it.month.toString() == selectedMonth }
     val chartScroll = rememberScrollState(Int.MAX_VALUE)
     LaunchedEffect(chartScroll.maxValue) { chartScroll.scrollTo(chartScroll.maxValue) }
     Page {
-        Title("우리 집 사용 흐름", "청구서에 표시된 실제 사용량을 모아요.")
-        SurfaceCard {
-            Text("최근 24개월", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        Title("사용 추이")
+        if (months.isNotEmpty()) SurfaceCard {
             val max = months.mapNotNull { it.usage }.maxOrNull()?.coerceAtLeast(1.0) ?: 1.0
-            Row(Modifier.fillMaxWidth().height(156.dp).horizontalScroll(chartScroll), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.Bottom) {
-                months.forEach { point ->
-                    val chosen = selectedMonth == point.month.toString()
-                    val description = buildString {
-                        append("${point.month.year}년 ${point.month.monthValue}월, ")
-                        append(point.usage?.let { "사용량 ${decimalText(it)} 세제곱미터" } ?: "사용 이력 없음")
-                        point.billedAmount?.let { append(", 청구월 합계 ${decimalText(it, 0)}원") }
-                    }
-                    Column(Modifier.width(30.dp).clickable { selectedMonth = point.month.toString() }
-                        .semantics { contentDescription = description }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                        Box(Modifier.width(24.dp).height(((point.usage ?: 0.0) / max * 112).dp.coerceAtLeast(3.dp))
-                            .background(if (point.usage == null) Color(0xFFDCE2DC) else if (chosen) Coral else Teal))
-                        Text(if (point.month.monthValue == 1) "${point.month.year}\n1" else "${point.month.monthValue}", fontSize = 9.sp, lineHeight = 10.sp, color = if (chosen) Ink else Muted)
+            BoxWithConstraints(Modifier.fillMaxWidth()) {
+                val columnWidth = maxWidth / months.size.coerceAtMost(13)
+                Row(Modifier.fillMaxWidth().height(156.dp).horizontalScroll(chartScroll), verticalAlignment = Alignment.Bottom) {
+                    months.forEach { point ->
+                        val chosen = selectedMonth == point.month.toString()
+                        val description = buildString {
+                            append("${point.month.year}년 ${point.month.monthValue}월, ")
+                            append(point.usage?.let { "사용량 ${decimalText(it)} 세제곱미터" } ?: "사용 이력 없음")
+                            point.billedAmount?.let { append(", 청구월 합계 ${decimalText(it, 0)}원") }
+                        }
+                        Column(Modifier.width(columnWidth).clickable { selectedMonth = point.month.toString() }
+                            .semantics { contentDescription = description }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                            Box(Modifier.height(112.dp).fillMaxWidth().padding(horizontal = 3.dp), contentAlignment = Alignment.BottomCenter) {
+                                Box(Modifier.fillMaxWidth().height(((point.usage ?: 0.0) / max * 112).dp.coerceAtLeast(3.dp))
+                                    .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
+                                    .background(if (point.usage == null) Color(0xFFDCE2DC) else if (chosen) Coral else Teal))
+                            }
+                            Text("${point.month.monthValue}", fontSize = 10.sp, lineHeight = 12.sp, color = if (chosen) Ink else Muted)
+                            Text(if (point.month.monthValue == 1 || point == months.first()) "${point.month.year}" else "", modifier = Modifier.height(12.dp), fontSize = 8.sp, lineHeight = 10.sp, color = Muted)
+                        }
                     }
                 }
             }
@@ -486,11 +545,22 @@ class MainActivity : ComponentActivity() {
                 Text(selected.usage?.let { "사용량 ${decimalText(it)} m³" } ?: "사용량 이력 없음", color = if (selected.usage == null) Muted else Ink)
                 Text(selected.billedAmount?.let { "가스비 ${decimalText(it, 0)}원 · 해당 청구월의 실제 합계" } ?: "가스비 정보 없음", color = Muted, style = MaterialTheme.typography.bodySmall)
             } else Text("막대를 누르면 월별 사용량과 가스비를 볼 수 있어요.", style = MaterialTheme.typography.bodySmall, color = Muted)
-            Text("기간별 사용량을 날짜에 나눠 월별로 환산했어요. 회색은 이력이 없는 달이며 가스비는 정확히 일치하는 청구월 합계만 표시해요.", style = MaterialTheme.typography.bodySmall, color = Muted)
+            Text(if (data.gasappBills.isEmpty()) "m³ · 월별 환산 사용량 · 회색은 이력 없음" else "m³ · 월별 사용량 · 회색은 이력 없음", style = MaterialTheme.typography.bodySmall, color = Muted)
         }
         ActionButton("과거 사용량 추가", Icons.Outlined.Add, onClick = add)
         Hint(Icons.Outlined.Lightbulb, "작년 같은 달과 앞뒤 달의 이력이 있으면 좋아요. 청구월보다 실제 사용 기간을 정확히 입력해 주세요.")
-        if (data.periods.isEmpty()) EmptyNote("아직 사용 이력이 없어요", "공급사 홈페이지나 청구서에서 과거 사용량을 확인해 입력해 주세요.")
+        if (data.periods.isEmpty() && data.gasappBills.isEmpty()) EmptyNote("아직 사용 이력이 없어요", "공급사 홈페이지나 청구서에서 과거 사용량을 확인해 입력해 주세요.")
+        data.gasappBills.sortedByDescending { it.month }.forEach { bill ->
+            Column(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("${bill.month.take(4)}.${bill.month.takeLast(2)} 청구", color = Muted, style = MaterialTheme.typography.labelMedium)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(bill.usage?.let { "${decimalText(it)} m³" } ?: "사용량 정보 없음", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                    bill.amount?.let { Text("${decimalText(it, 0)}원", style = MaterialTheme.typography.bodyMedium) }
+                }
+                if (bill.start != null && bill.end != null) Text("${bill.start} ~ ${bill.end}", color = Muted, style = MaterialTheme.typography.bodySmall)
+            }
+            HorizontalDivider(color = Pale)
+        }
         data.periods.sortedByDescending { it.end }.forEachIndexed { index, period ->
             Column(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -526,24 +596,26 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@Composable private fun SettingsPage(data: AppData, enable: () -> Unit, disable: () -> Unit, setTime: (Int, Int) -> Unit,
+@Composable private fun SettingsPage(data: AppData, enable: () -> Unit, disable: () -> Unit, setTime: (Int, Int) -> Unit, setRepeatCount: (Int) -> Unit,
     login: () -> Unit, forget: () -> Unit, export: () -> Unit, restore: () -> Unit, meter: () -> Unit, erase: () -> Unit, update: () -> Unit, licenses: () -> Unit, open: (String) -> Unit, busy: Boolean) {
     val provider = Providers.get(data.profile.providerId)
     Page {
-        Title("내 방식대로", "연결과 기록은 내가 관리해요.")
-        SettingsSection("알림") {
-            SettingToggle("매주 실측 확인 알림", "계량기 숫자를 확인할 시간을 알려드려요", Icons.Outlined.Notifications,
+        Title("앱 설정")
+        SettingsSection("보정알림") {
+            SettingToggle("보정알림", "계량기 숫자를 확인할 시간을 알려드려요", Icons.Outlined.Notifications,
                 data.profile.reminder) { if (it) enable() else disable() }
             val days = listOf("월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일")
             SettingChoice("요일", days[data.profile.reminderDay - 1], Icons.Outlined.CalendarToday, days) { setTime(days.indexOf(it) + 1, data.profile.reminderHour) }
             SettingChoice("시간", "${data.profile.reminderHour}시", Icons.Outlined.Schedule, (0..23).map { "${it}시" }) { setTime(data.profile.reminderDay, it.removeSuffix("시").toInt()) }
+            SettingChoice("다음 날 다시 알림", "${data.profile.reminderRepeatCount}회", Icons.Outlined.Replay, (0..6).map { "${it}회" }) { setRepeatCount(it.removeSuffix("회").toInt()) }
+            Text("보정을 깜빡하면 다음 날 같은 시각에 다시 알려드려요.", modifier = Modifier.padding(horizontal = 12.dp), color = Muted, style = MaterialTheme.typography.bodySmall)
             Text("한국 시간 기준이며 기기 상태에 따라 알림이 늦어질 수 있어요.", modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp), color = Muted, style = MaterialTheme.typography.bodySmall)
         }
         SettingsSection("공급사") {
-            SettingInfo(provider.name, if (data.credentials == null) "저장된 로그인 정보 없음" else "로그인 정보가 이 기기에 암호화되어 있어요", Icons.Outlined.Apartment)
-            if (provider.skens && data.profile.meter != "demo") SettingAction("다시 연결", Icons.Outlined.Login, login, "${provider.name} 계정과 계약을 다시 확인해요", !busy)
+            SettingInfo(provider.name, if (data.credentials == null && data.gasappConnection == null) "저장된 로그인 정보 없음" else "연결 정보가 이 기기에 암호화되어 있어요", Icons.Outlined.Apartment)
+            if ((provider.skens || provider.gasapp) && data.profile.meter != "demo") SettingAction("다시 연결", Icons.Outlined.Login, login, "${provider.name} 계정과 계약을 다시 확인해요", !busy)
             SettingAction("공급사 홈페이지", Icons.Outlined.OpenInNew, { open(provider.website) }, provider.name)
-            if (data.credentials != null) SettingAction("로그인 정보 삭제", Icons.Outlined.NoAccounts, forget, "사용 기록은 그대로 유지해요", !busy)
+            if (data.credentials != null || data.gasappConnection != null) SettingAction("로그인 정보 삭제", Icons.Outlined.NoAccounts, forget, "사용 기록은 그대로 유지해요", !busy)
         }
         SettingsSection("내 기록") {
             SettingAction("기록 내보내기", Icons.Outlined.FileUpload, export, "로그인 정보를 제외한 백업 파일을 만들어요")
