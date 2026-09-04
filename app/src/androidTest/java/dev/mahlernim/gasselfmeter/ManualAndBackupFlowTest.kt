@@ -36,6 +36,7 @@ class ManualAndBackupFlowTest {
             compose.onNodeWithText("설정", useUnmergedTree = true).performClick()
             compose.onNode(isToggleable()).performClick()
             compose.waitUntil(5000) { SecureStore(context).read().profile.reminder }
+            compose.awaitStorage(scenario)
             val workManager = androidx.work.WorkManager.getInstance(context)
             val scheduled = workManager.getWorkInfosForUniqueWork("calibration-daily-check").get(5, java.util.concurrent.TimeUnit.SECONDS)
             assertTrue(scheduled.any { it.state == androidx.work.WorkInfo.State.ENQUEUED })

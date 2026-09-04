@@ -14,7 +14,8 @@ import java.util.UUID
 import kotlin.concurrent.withLock
 
 class GasViewModel(app: Application) : AndroidViewModel(app) {
-    private val store = SecureStore(app)
+    // Context.filesDir can itself touch disk, so construct the store on its first IO call too.
+    private val store by lazy { SecureStore(app) }
     var data by mutableStateOf(AppData()); private set
     var message by mutableStateOf<String?>(null)
     var loginError by mutableStateOf<String?>(null); private set
@@ -92,9 +93,9 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
         save(data.copy(profile = data.profile.copy(providerId = provider), ready = true))
     }
     fun calibrate(reading: String, onResult: (String?) -> Unit = {}) = attempt(onResult) {
-            save(Estimator.addObservation(data, number(reading)))
-            Reminders.schedule(getApplication(), data.profile)
-            message = "실제 확인값을 저장했어요. 화면과 다음 추정에 반영했어요."
+        save(Estimator.addObservation(data, number(reading)))
+        scheduleReminder()
+        message = "실제 확인값을 저장했어요. 화면과 다음 추정에 반영했어요."
     }
     fun addPeriod(start: String, end: String, usage: String, onResult: (String?) -> Unit = {}) = attempt(onResult) {
         val period = UsagePeriod(LocalDate.parse(start).toString(), LocalDate.parse(end).toString(), number(usage))
@@ -111,29 +112,29 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
     }
     fun changeProvider() = attempt {
         save(data.copy(ready = false, credentials = null, submissionSettings = SubmissionSettings(), cachedSelfRead = null, gasappConnection = null, cachedGasappTarget = null))
-        SubmissionScheduler.schedule(getApplication(), data)
-        ProviderRefresh.schedule(getApplication(), data)
+        scheduleSubmission()
+        scheduleRefresh()
     }
     fun forgetCredentials() = attempt {
         save(data.copy(credentials = null, gasappConnection = null, submissionSettings = data.submissionSettings.copy(automatic = false)))
-        SubmissionScheduler.schedule(getApplication(), data)
-        ProviderRefresh.schedule(getApplication(), data)
+        scheduleSubmission()
+        scheduleRefresh()
         message = "저장한 로그인 정보를 지웠고 자동 입력을 껐어요."
     }
     fun setReminder(enabled: Boolean, day: Int, hour: Int) = attempt {
         val profile = data.profile.copy(reminder = enabled, reminderDay = day, reminderHour = hour)
         save(data.copy(profile = profile))
-        Reminders.schedule(getApplication(), profile)
+        scheduleReminder()
     }
     fun setReminderRepeatCount(count: Int) = attempt {
         require(count in 0..6)
         save(data.copy(profile = data.profile.copy(reminderRepeatCount = count)))
-        Reminders.schedule(getApplication(), data.profile)
+        scheduleReminder()
     }
     fun setSubmissionSettings(settings: SubmissionSettings) = attempt {
         require(settings.recentDays in 1..30 && settings.reminderHour in 0..23 && settings.reminderMinute in 0..59)
         save(data.copy(submissionSettings = settings.copy(automatic = settings.automatic && Providers.get(data.profile.providerId).automaticSubmission)))
-        SubmissionScheduler.schedule(getApplication(), data)
+        scheduleSubmission()
     }
     fun login(providerId: String, username: String, password: String, rememberPassword: Boolean) {
         if (busy) return
@@ -174,8 +175,8 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
                 SubmissionGate.lock.withLock { SamchullyBridge.snapshot(login, selected) }
             }
             save(SamchullyBridge.merge(data, snapshot, if (remember) pendingCredentials else null))
-            SubmissionScheduler.schedule(getApplication(), data)
-            ProviderRefresh.schedule(getApplication(), data)
+            scheduleSubmission()
+            scheduleRefresh()
             message = "삼천리 청구 이력 ${snapshot.bills.size}개월을 가져왔어요. " + snapshot.warning
             clearPending()
             return
@@ -196,8 +197,8 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
         save(data.copy(profile = data.profile.copy(providerId = provider.id, meter = result.meter, contract = contractKey, customerNumber = contract.ca, plannedDate = result.planned, syncTime = System.currentTimeMillis()),
             periods = periods, credentials = if (remember) pendingCredentials else null, ready = true, cachedSelfRead = result.selfRead, gasappConnection = null, cachedGasappTarget = null))
         selfReadTarget = result.selfRead
-        SubmissionScheduler.schedule(getApplication(), data)
-        ProviderRefresh.schedule(getApplication(), data)
+        scheduleSubmission()
+        scheduleRefresh()
         val changed = data.observations.isNotEmpty() && data.observations.last().meter != result.meter
         message = result.warning ?: if (changed) "계량기 정보가 달라졌어요. 현재 숫자를 다시 확인해 주세요." else "${newMonths.size}개월의 청구 이력을 가져왔어요."
         clearPending()
@@ -212,8 +213,8 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 data = withContext(Dispatchers.IO) { action() }
                 selfReadTarget = data.cachedSelfRead
-                ProviderRefresh.schedule(getApplication(), data)
-                SubmissionScheduler.schedule(getApplication(), data)
+                scheduleRefresh()
+                scheduleSubmission()
                 val recent = data.submissions.lastOrNull { System.currentTimeMillis() - it.attemptedAt < 60_000 }
                 if (recent?.status == "confirmed") getApplication<Application>().getSystemService(android.app.NotificationManager::class.java).cancel(3)
                 message = recent?.detail ?: "공급사 정보를 확인했어요."
@@ -324,11 +325,14 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
             scheduleStoredData()
         }
     }
-    private fun scheduleStoredData() {
-        ProviderRefresh.schedule(getApplication(), data)
-        SubmissionScheduler.schedule(getApplication(), data)
-        Reminders.schedule(getApplication(), data.profile)
+    private suspend fun scheduleStoredData() {
+        scheduleRefresh()
+        scheduleSubmission()
+        scheduleReminder()
     }
+    private suspend fun scheduleReminder(profile: Profile = data.profile) = withContext(Dispatchers.IO) { Reminders.schedule(getApplication(), profile) }
+    private suspend fun scheduleSubmission(snapshot: AppData = data) = withContext(Dispatchers.IO) { SubmissionScheduler.schedule(getApplication(), snapshot) }
+    private suspend fun scheduleRefresh(snapshot: AppData = data) = withContext(Dispatchers.IO) { ProviderRefresh.schedule(getApplication(), snapshot) }
     private fun refreshIfDue() {
         if ((data.credentials != null || data.gasappConnection != null) &&
             (data.profile.syncTime == null || System.currentTimeMillis() - data.profile.syncTime!! >= 86_400_000L)) refresh(false)
@@ -388,17 +392,14 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
         val next = restored.copy(ready = true)
         withContext(Dispatchers.IO) { SubmissionGate.lock.withLock { store.write(next) } }
         storageError = false; publish(next)
-        Reminders.schedule(getApplication(), data.profile)
-        SubmissionScheduler.schedule(getApplication(), data)
-        ProviderRefresh.schedule(getApplication(), data)
+        scheduleStoredData()
         message = "기록을 복원했어요. 로그인 정보와 알림 설정은 다시 연결해 주세요."
     }
     fun erase() = attempt {
         clearPending()
         withContext(Dispatchers.IO) { SubmissionGate.lock.withLock { store.erase(); Diagnostics.clear(getApplication()) } }
         publish(AppData()); storageError = false
-        Reminders.schedule(getApplication(), data.profile); SubmissionScheduler.schedule(getApplication(), data)
-        ProviderRefresh.schedule(getApplication(), data)
+        scheduleStoredData()
         message = "기기에 저장된 데이터를 모두 지웠어요."
     }
     fun loadDemo() = attempt {

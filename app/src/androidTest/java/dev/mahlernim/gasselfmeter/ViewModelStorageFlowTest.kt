@@ -69,7 +69,7 @@ class ViewModelStorageFlowTest {
     @Test
     @androidx.test.filters.SdkSuppress(minSdkVersion = 28)
     fun startupForegroundSaveRestoreAndEraseDoNotReadOrWriteDiskOnMain() {
-        SecureStore(app).write(AppData(ready = true))
+        SecureStore(app).write(AppData(profile = Profile(reminder = true), ready = true))
         // Initialize platform schedulers before measuring the ViewModel's own storage work.
         androidx.work.WorkManager.getInstance(app)
         val violations = CopyOnWriteArrayList<String>()
@@ -80,7 +80,7 @@ class ViewModelStorageFlowTest {
             oldPolicy = StrictMode.getThreadPolicy()
             StrictMode.setThreadPolicy(StrictMode.ThreadPolicy.Builder()
                 .detectDiskReads().detectDiskWrites()
-                .penaltyListener({ command -> command.run() }) { violation -> violations.add(violation.toString()) }
+                .penaltyListener({ command -> command.run() }) { violation -> violations.add(violation.stackTraceToString()) }
                 .build())
             vm = ViewModelProvider(owner, ViewModelProvider.AndroidViewModelFactory.getInstance(app))[GasViewModel::class.java]
         }
