@@ -5,6 +5,33 @@ import org.junit.Test
 import java.time.LocalDate
 
 class SubmissionPolicyTest {
+    @Test fun persistedPendingAndUncertainRecordsBlockBothModesAfterReload() {
+        for (status in listOf("pending", "uncertain", "confirmed")) {
+            val record = SubmissionRecord("cycle", target.start, target.end, 107.0, time - 1000, status, "synthetic")
+            val restored = DataCodec.decode(DataCodec.encode(data(records = listOf(record)), true), true)
+            assertTrue(restored.submissionSettings.enabled)
+            for (automatic in listOf(false, true)) {
+                assertFalse(SubmissionPolicy.decide(restored, target, time, automatic).allowed)
+            }
+        }
+    }
+
+    @Test fun rejectedAttemptNeedsManualReviewInsteadOfAutomaticRetry() {
+        val record = SubmissionRecord("cycle", target.start, target.end, 107.0, time - 1000, "rejected", "synthetic")
+        assertFalse(SubmissionPolicy.decide(data(records = listOf(record)), target, time, true).allowed)
+        assertTrue(SubmissionPolicy.decide(data(records = listOf(record)), target, time, false).allowed)
+    }
+
+    @Test fun deadlineUsesKoreanMidnightAndRejectsClockRollback() {
+        val start = dayStart(date)
+        assertFalse(SubmissionPolicy.decide(data(), target, start - 1, true).allowed)
+        assertTrue(SubmissionPolicy.decide(data(), target, start, true).allowed)
+        assertTrue(SubmissionPolicy.decide(data(), target, start + 86_400_000 - 1, true).allowed)
+        assertFalse(SubmissionPolicy.decide(data(), target, start + 86_400_000, true).allowed)
+        assertFalse(SubmissionPolicy.decide(data(-1), target, time, true).allowed)
+    }
+
+
     private val date = LocalDate.of(2026, 9, 4)
     private val time = dayStart(date) + 10 * 3_600_000L
     private val target = SelfReadTarget(

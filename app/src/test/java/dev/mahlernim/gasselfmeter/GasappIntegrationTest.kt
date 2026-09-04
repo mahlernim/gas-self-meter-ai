@@ -6,6 +6,17 @@ import java.time.LocalDate
 import java.time.YearMonth
 
 class GasappIntegrationTest {
+    @Test fun rejectedAttemptCannotBeAutomaticallyRetried() {
+        val time = dayStart(LocalDate.of(2026, 9, 7))
+        val calibrated = data().copy(submissionSettings = SubmissionSettings(automatic = true),
+            observations = listOf(Observation(time - 86_400_000, 111.0, meter), Observation(time, 113.0, meter)))
+        assertTrue(GasappSubmissionPolicy.decide(calibrated, target, time, true).allowed)
+        val rejected = SubmissionRecord(target.cycle, target.start!!, target.end!!, 113.0, time, "rejected", "")
+        val attempted = calibrated.copy(submissions = listOf(rejected))
+        assertFalse(GasappSubmissionPolicy.decide(attempted, target, time, true).allowed)
+        assertTrue(GasappSubmissionPolicy.decide(attempted, target, time, false).allowed)
+    }
+
     private val account = GasappAccount("1", "customer", "contract", "집", "N")
     private val session = GasappSession("synthetic-token", "synthetic-member", "synthetic-device")
     private val meter = gasappHash("meter:1:meter")

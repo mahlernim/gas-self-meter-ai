@@ -91,11 +91,12 @@ object SubmissionPolicy {
         if (date !in start..end) return SubmissionDecision(false, null, "입력 가능 기간은 ${target.start}부터 ${target.end}까지예요.")
         if (automatic && date != end) return SubmissionDecision(false, null, "자동 입력은 검침 기간 마지막 날에 실행해요.")
         val prior = data.submissions.lastOrNull { it.cycle == target.cycle }
-        if (prior?.status in setOf("pending", "confirmed", "uncertain")) {
+        if (prior?.status in setOf("pending", "confirmed", "uncertain") || (automatic && prior != null)) {
             return SubmissionDecision(false, prior?.value, if (prior?.status == "confirmed") "이번 검침값 입력을 완료했어요." else "이전 전송 결과를 먼저 공급사에서 확인해 주세요.")
         }
         val latest = data.observations.lastOrNull { it.meter == data.profile.meter }
             ?: return SubmissionDecision(false, null, "실제 계량기 숫자를 먼저 확인해 주세요.")
+        if (latest.time > time) return SubmissionDecision(false, null, "실측 확인 시각이 현재보다 미래예요. 기기 시간을 확인해 주세요.")
         val age = ((time - latest.time) / 86_400_000).coerceAtLeast(0)
         if (automatic && settings.requireRecentCheck && age > settings.recentDays) {
             return SubmissionDecision(false, null, "마지막 실측 확인이 ${age}일 전이에요. ${settings.recentDays}일 이내에 다시 확인해 주세요.")

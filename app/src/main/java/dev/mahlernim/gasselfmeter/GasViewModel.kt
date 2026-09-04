@@ -206,7 +206,8 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
             gasappAction("제출 직전 공급사 상태를 다시 확인하는 중") { GasappBridge.submit(getApplication(), value, automatic = false) }
             return
         }
-        val credentials = data.credentials ?: run { message = "검침값을 입력하려면 로그인 정보를 이 기기에 저장해 주세요."; return }
+        if (data.credentials == null) { message = "검침값을 입력하려면 로그인 정보를 이 기기에 저장해 주세요."; return }
+        val reviewed = data
         busy = true; setProgress(0, 4, "제출 직전 공급사 상태를 다시 확인하는 중")
         viewModelScope.launch {
             var record: SubmissionRecord? = null
@@ -214,18 +215,26 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
                 withContext(Dispatchers.IO) {
                     SubmissionGate.lock.lock()
                     try {
-                        withContext(Dispatchers.Main) { data = store.read() }
-                        val provider = Providers.skens(data.profile.providerId)
+                        // Do not suspend while holding the thread-owned lock.
+                        val current = store.read()
+                        check(BackgroundState.sameAccount(current, reviewed)) { "확인한 계정이나 계량기가 바뀌었어요. 다시 확인해 주세요." }
+                        val credentials = current.credentials ?: error("저장된 로그인 정보가 없어요.")
+                        val provider = Providers.skens(current.profile.providerId)
                         SkensClient(provider, credentials).use { client ->
-                            val contract = client.login().find { SkensClient.contractKey(provider, it) == data.profile.contract }
+                            val contract = client.login().find { SkensClient.contractKey(provider, it) == current.profile.contract }
                                 ?: error("저장된 계약을 찾지 못했어요. 공급사를 다시 연결해 주세요.")
                             val target = client.selfReadTarget(contract)
                             viewModelScope.launch { selfReadTarget = target; setProgress(1, 4, "입력 기간과 기존 제출 여부를 확인했어요") }
-                            val decision = SubmissionPolicy.decide(data, target, System.currentTimeMillis(), automatic = false)
+                            val decision = SubmissionPolicy.decide(current, target, System.currentTimeMillis(), automatic = false)
                             require(decision.allowed && decision.value != null) { decision.reason }
                             require(kotlin.math.abs(decision.value - value) < .001) { "확인 후 제출값이 달라졌어요. 화면에서 다시 확인해 주세요." }
                             record = SubmissionRecord(target.cycle, target.start, target.end, value, System.currentTimeMillis(), "pending", "공급사 확인 대기")
-                            withContext(Dispatchers.Main) { save(data.copy(submissions = (data.submissions.filterNot { it.cycle == target.cycle } + record!!).takeLast(100))) }
+                            store.update { latest ->
+                                check(BackgroundState.sameAccount(latest, current)) { "계정 정보가 변경되었어요." }
+                                val latestDecision = SubmissionPolicy.decide(latest, target, System.currentTimeMillis(), automatic = false)
+                                check(latestDecision.allowed && latestDecision.value == decision.value) { latestDecision.reason }
+                                latest.copy(submissions = (latest.submissions.filterNot { it.cycle == target.cycle } + record!!).takeLast(100))
+                            }
                             viewModelScope.launch { setProgress(2, 4, "검침값을 한 번만 전송하는 중") }
                             val outcome = client.submitReading(target, value)
                             val status = when { !outcome.accepted -> "rejected"; outcome.confirmed -> "confirmed"; else -> "uncertain" }
@@ -234,14 +243,19 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
                                 "rejected" -> "공급사가 입력을 받지 않았어요."
                                 else -> "응답은 성공이지만 재조회 확인이 필요해요. 자동 재전송하지 않습니다."
                             }
-                            withContext(Dispatchers.Main) { replaceSubmission(record!!.copy(status = status, detail = detail)) }
+                            store.update { BackgroundState.finish(it, current, record!!.copy(status = status, detail = detail)) }
                         }
                     } finally { SubmissionGate.lock.unlock() }
                 }
+                data = store.read()
+                if (data.submissions.lastOrNull()?.status == "confirmed") getApplication<Application>().getSystemService(android.app.NotificationManager::class.java).cancel(3)
                 setProgress(4, 4, "검침값 입력 결과를 확인했어요")
                 message = data.submissions.lastOrNull()?.detail ?: "검침값 입력을 마쳤어요."
             } catch (e: Exception) {
-                record?.let { replaceSubmission(it.copy(status = "uncertain", detail = "전송 결과를 확정하지 못했어요. 자동 재전송하지 않습니다.")) }
+                record?.let { attempt ->
+                    store.update { BackgroundState.finish(it, reviewed, attempt.copy(status = "uncertain", detail = "전송 결과를 확정하지 못했어요. 자동 재전송하지 않습니다.")) }
+                }
+                data = store.read()
                 message = record?.let { "전송 결과를 확정하지 못했어요. 공급사 홈페이지에서 확인해 주세요." } ?: readableError(e)
             } finally { busy = false }
         }
