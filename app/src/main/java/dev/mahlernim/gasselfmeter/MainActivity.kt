@@ -110,6 +110,7 @@ class MainActivity : ComponentActivity() {
     var confirmation by remember { mutableStateOf<String?>(null) }
     var restoreRaw by remember { mutableStateOf<String?>(null) }
     var licenses by remember { mutableStateOf(false) }
+    var diagnostics by remember { mutableStateOf(false) }
     var refreshConfirmation by remember { mutableStateOf(false) }
     var notificationPurpose by remember { mutableStateOf("calibration") }
     var submitValue by remember { mutableStateOf<Double?>(null) }
@@ -166,7 +167,7 @@ class MainActivity : ComponentActivity() {
                     TextButton(onClick = { confirmation = "erase" }) { Text("저장 데이터 초기화") }
                 }
             } else if (!data.ready) {
-                Welcome(vm.busy, { vm.manual(it) }, { loginProviderId = it }, { vm.loadDemo() }, { importer.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) }, ::open)
+                Welcome(vm.busy, { vm.manual(it) }, { loginProviderId = it }, { vm.loadDemo() }, { importer.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) }, ::open, { diagnostics = true })
             } else when (tab) {
                 0 -> Dashboard(data, estimate, now, { calibration = decimalText(estimate.reading).takeIf { estimate.reading != null } ?: "" }, { tab = 2 }, { refreshConfirmation = true }, {
                     (context.getSystemService(ClipboardManager::class.java)).setPrimaryClip(ClipData.newPlainText("계약자번호", data.profile.customerNumber))
@@ -188,7 +189,7 @@ class MainActivity : ComponentActivity() {
                     { day, hour -> vm.setReminder(data.profile.reminder, day, hour) }, vm::setReminderRepeatCount,
                     { loginProviderId = data.profile.providerId }, { vm.forgetCredentials() },
                     { export.launch("gas-self-meter-${today()}.json") }, { importer.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) },
-                    { confirmation = "meter" }, { confirmation = "erase" }, ::openUpdate, { licenses = true }, ::open, vm.busy)
+                    { confirmation = "meter" }, { confirmation = "erase" }, ::openUpdate, { licenses = true }, ::open, vm.busy, { diagnostics = true })
             }
         }
     }
@@ -224,9 +225,9 @@ class MainActivity : ComponentActivity() {
                     }, { loginProviderId = null })
                 }
             }
-        } else LoginDialog(Providers.skens(providerId), vm.busy, vm.progress, vm.progressCurrent, vm.progressTotal, vm.contracts, vm.loginError,
+        } else LoginDialog(Providers.get(providerId), vm.busy, vm.progress, vm.progressCurrent, vm.progressTotal, vm.contracts, vm.loginError,
             { if (!vm.busy) { loginProviderId = null; vm.cancelLogin() } },
-            { u, p, remember -> vm.login(providerId, u, p, remember) }, { vm.selectContract(it) }, ::open)
+            { u, p, remember -> vm.login(providerId, u, p, remember) }, { vm.selectContract(it) }, ::open, { diagnostics = true })
     }
     LaunchedEffect(data.profile.syncTime) { if (data.profile.syncTime != null && vm.contracts.isEmpty()) loginProviderId = null }
     LaunchedEffect(vm.busy) { if (!vm.busy && data.ready && data.profile.syncTime != null && vm.contracts.isEmpty() && vm.message?.contains("개월") == true) loginProviderId = null }
@@ -281,6 +282,21 @@ class MainActivity : ComponentActivity() {
             },
             confirmButton = { TextButton(onClick = { licenses = false }) { Text("닫기") } })
     }
+    if (diagnostics) {
+        var report by remember { mutableStateOf(Diagnostics.report(context)) }
+        AlertDialog(onDismissRequest = { diagnostics = false }, title = { Text("진단 기록") },
+            text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("서버로 자동 전송하지 않습니다.")
+                Text("계정·비밀번호·청구 내용은 제외하며 오류 단계와 코드만 기기에 최대 100건 보관해요. 복사한 내용을 확인하고 오류 신고에 붙여 주세요.", style = MaterialTheme.typography.bodySmall)
+                Text(report, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+                TextButton(onClick = { vm.attempt { Diagnostics.clear(context); report = Diagnostics.report(context) } }) { Text("기록 지우기") }
+            } },
+            confirmButton = { TextButton(onClick = {
+                context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("진단 기록", report))
+                vm.message = "진단 기록을 복사했어요. 내용을 확인한 뒤 오류 신고에 붙여 주세요."
+            }) { Text("복사") } },
+            dismissButton = { TextButton(onClick = { diagnostics = false }) { Text("닫기") } })
+    }
 }
 
 @Composable private fun Page(content: @Composable ColumnScope.() -> Unit) {
@@ -312,7 +328,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@Composable private fun Welcome(busy: Boolean, onManual: (String) -> Unit, onLogin: (String) -> Unit, onDemo: () -> Unit, onImport: () -> Unit, open: (String) -> Unit) {
+@Composable private fun Welcome(busy: Boolean, onManual: (String) -> Unit, onLogin: (String) -> Unit, onDemo: () -> Unit, onImport: () -> Unit, open: (String) -> Unit, diagnostics: () -> Unit) {
     var region by rememberSaveable { mutableStateOf("부산") }
     var providerId by rememberSaveable { mutableStateOf("busan") }
     Page {
@@ -331,6 +347,7 @@ class MainActivity : ComponentActivity() {
             Choice("도시가스 공급사", Providers.get(providerId).name, providers.map { it.name }) { name -> providerId = providers.first { it.name == name }.id }
             val provider = Providers.get(providerId)
             if (provider.automatic) {
+                if (provider.experimentalReadOnly) Text("실험적 조회 연결 · 아직 계정별 검증 중이며 검침 제출은 지원하지 않아요.", color = Muted, style = MaterialTheme.typography.bodySmall)
                 Hint(Icons.Outlined.CloudDownload, if (provider.gasapp) "가스앱 본인인증으로 ${provider.name} 사용 계약과 청구 이력을 가져와요." else "${provider.name} 계정으로 청구 이력을 가져올 수 있어요.")
                 ActionButton("${provider.name} 연결하기", Icons.Outlined.Login, !busy) { onLogin(providerId) }
                 TextButton(onClick = { onManual(providerId) }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("로그인 없이 직접 시작") }
@@ -342,6 +359,7 @@ class MainActivity : ComponentActivity() {
             }
         }
         Hint(Icons.Outlined.Lock, "로그인 정보와 사용 기록은 기기에 암호화해 보관해요. 별도 서버나 광고·분석 도구를 사용하지 않아요.")
+        TextButton(onClick = diagnostics) { Text("진단 기록") }
         Text("계량기 보고 보정하기는 실측값을 저장해요. 공급사 제출은 제출 탭에서 진행해요.", color = Muted, style = MaterialTheme.typography.bodySmall)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
             TextButton(onClick = onDemo, enabled = !busy) { Text("예시로 둘러보기") }
@@ -431,6 +449,17 @@ class MainActivity : ComponentActivity() {
     changeSettings: (SubmissionSettings) -> Unit) {
     val settings = data.submissionSettings
     val provider = Providers.get(data.profile.providerId)
+    if (provider.experimentalReadOnly) {
+        val context = LocalContext.current
+        Page {
+            Title("삼천리 조회 전용", "알파테스트 중인 연결입니다. 청구 이력 조회만 지원해요.")
+            Text("검침값 제출과 제출 알림은 아직 제공하지 않습니다. 공식 고객센터를 이용해 주세요.")
+            ActionButton("삼천리 고객센터", Icons.Outlined.OpenInNew) {
+                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(provider.website)))
+            }
+        }
+        return
+    }
     val gasappTarget = data.cachedGasappTarget
     val decision = if (provider.gasapp) GasappSubmissionPolicy.decide(data, gasappTarget, now, automatic = false)
         else SubmissionPolicy.decide(data, target, now, automatic = false)
@@ -507,7 +536,8 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable private fun HistoryPage(data: AppData, add: () -> Unit, delete: (UsagePeriod) -> Unit, deleteObservation: (Observation) -> Unit) {
-    val months = remember(data.periods, data.gasappBills) { HistorySummary.months(data, YearMonth.from(today())).dropWhile { it.usage == null && it.billedAmount == null }.dropLastWhile { it.usage == null && it.billedAmount == null } }
+    val historyMonth = YearMonth.from(today())
+    val months = remember(data.periods, data.gasappBills, data.samchullyBills, data.profile.providerId, historyMonth) { HistorySummary.months(data, historyMonth).dropWhile { it.usage == null && it.billedAmount == null }.dropLastWhile { it.usage == null && it.billedAmount == null } }
     var selectedMonth by rememberSaveable { mutableStateOf<String?>(null) }
     val selected = months.find { it.month.toString() == selectedMonth }
     val chartScroll = rememberScrollState(Int.MAX_VALUE)
@@ -597,7 +627,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable private fun SettingsPage(data: AppData, enable: () -> Unit, disable: () -> Unit, setTime: (Int, Int) -> Unit, setRepeatCount: (Int) -> Unit,
-    login: () -> Unit, forget: () -> Unit, export: () -> Unit, restore: () -> Unit, meter: () -> Unit, erase: () -> Unit, update: () -> Unit, licenses: () -> Unit, open: (String) -> Unit, busy: Boolean) {
+    login: () -> Unit, forget: () -> Unit, export: () -> Unit, restore: () -> Unit, meter: () -> Unit, erase: () -> Unit, update: () -> Unit, licenses: () -> Unit, open: (String) -> Unit, busy: Boolean, diagnostics: () -> Unit) {
     val provider = Providers.get(data.profile.providerId)
     Page {
         Title("앱 설정")
@@ -613,7 +643,8 @@ class MainActivity : ComponentActivity() {
         }
         SettingsSection("공급사") {
             SettingInfo(provider.name, if (data.credentials == null && data.gasappConnection == null) "저장된 로그인 정보 없음" else "연결 정보가 이 기기에 암호화되어 있어요", Icons.Outlined.Apartment)
-            if ((provider.skens || provider.gasapp) && data.profile.meter != "demo") SettingAction("다시 연결", Icons.Outlined.Login, login, "${provider.name} 계정과 계약을 다시 확인해요", !busy)
+            if ((provider.passwordConnection || provider.gasapp) && data.profile.meter != "demo") SettingAction("다시 연결", Icons.Outlined.Login, login, "${provider.name} 계정과 계약을 다시 확인해요", !busy)
+            if (provider.experimentalReadOnly) Text("실험적 조회 연결 · 검침 제출 미지원", Modifier.padding(12.dp), color = Muted)
             SettingAction("공급사 홈페이지", Icons.Outlined.OpenInNew, { open(provider.website) }, provider.name)
             if (data.credentials != null || data.gasappConnection != null) SettingAction("로그인 정보 삭제", Icons.Outlined.NoAccounts, forget, "사용 기록은 그대로 유지해요", !busy)
         }
@@ -629,6 +660,7 @@ class MainActivity : ComponentActivity() {
             SettingAction("개인정보 처리방침", Icons.Outlined.PrivacyTip, { open(AppLinks.PRIVACY) })
             SettingAction("소스 코드", Icons.Outlined.Code, { open(AppLinks.SOURCE) }, "지원 범위와 개발 내용을 확인해요")
             SettingAction("오류 신고", Icons.Outlined.BugReport, { open(AppLinks.ISSUES) })
+            SettingAction("진단 기록", Icons.Outlined.ListAlt, diagnostics, "오류 단계와 코드를 확인하고 복사해요. 자동 전송하지 않아요.")
             SettingAction("오픈소스 라이선스", Icons.Outlined.Policy, licenses)
         }
         Hint(Icons.Outlined.PrivacyTip, "계정 로그인, 청구 조회와 선택한 검침값 제출만 공급사에 직접 전송해요. 계산은 기기 안에서 이루어지며 광고와 사용자 추적 기능은 없어요.")
@@ -751,7 +783,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable private fun LoginDialog(provider: Provider, busy: Boolean, progress: String, progressCurrent: Int, progressTotal: Int, contracts: List<Contract>, error: String?, close: () -> Unit,
-    login: (String, String, Boolean) -> Unit, choose: (Contract) -> Unit, open: (String) -> Unit) {
+    login: (String, String, Boolean) -> Unit, choose: (Contract) -> Unit, open: (String) -> Unit, diagnostics: () -> Unit) {
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var visible by remember { mutableStateOf(false) }
@@ -760,7 +792,10 @@ class MainActivity : ComponentActivity() {
         text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             if (contracts.size > 1) contracts.forEach { contract -> OutlinedButton(onClick = { choose(contract) }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text(contract.label) } }
             else {
-                Text("${provider.name} 홈페이지 계정으로 로그인해요. 기기에서 공급사로 직접 연결해 청구 이력과 검침 기간을 확인하고, 동의한 경우 검침값도 입력할 수 있어요.")
+                if (provider.experimentalReadOnly) {
+                    Text("실험적 조회 연결", fontWeight = FontWeight.Bold)
+                    Text("삼천리 개인회원 계정으로 로그인해 청구 이력을 조회해요. 아직 계정별 검증 중이므로 실패할 수 있어요. 검침값은 전송하지 않으며 오류가 나면 진단 기록을 복사해 알려 주세요.")
+                } else Text("${provider.name} 홈페이지 계정으로 로그인해요. 기기에서 공급사로 직접 연결해 청구 이력과 검침 기간을 확인하고, 동의한 경우 검침값도 입력할 수 있어요.")
                 OutlinedTextField(username, { username = it }, label = { Text("아이디") }, singleLine = true, enabled = !busy)
                 OutlinedTextField(password, { password = it }, label = { Text("비밀번호") }, singleLine = true, enabled = !busy,
                     visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
@@ -768,13 +803,14 @@ class MainActivity : ComponentActivity() {
                     trailingIcon = { IconButton(onClick = { visible = !visible }) { Icon(if (visible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility, if (visible) "비밀번호 숨기기" else "비밀번호 보기") } })
                 Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(rememberPassword, { rememberPassword = it }, enabled = !busy); Text("이 기기에 암호화해서 저장", style = MaterialTheme.typography.bodySmall) }
                 TextButton(onClick = { open(provider.accountRecovery) }, enabled = !busy) { Text("아이디·비밀번호가 기억나지 않아요") }
-                TextButton(onClick = { open(provider.registration) }, enabled = !busy) { Text("${provider.name} 회원가입") }
+                if (provider.skens) TextButton(onClick = { open(provider.registration) }, enabled = !busy) { Text("${provider.name} 회원가입") }
                 if (busy) {
                     if (progressTotal > 0) LinearProgressIndicator(progress = { (progressCurrent.toFloat() / progressTotal).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
                     else LinearProgressIndicator(Modifier.fillMaxWidth())
                     Text(progress.ifBlank { "공급사 정보를 확인하는 중" }, color = Muted, style = MaterialTheme.typography.bodySmall)
                 }
                 if (!busy && error != null) Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                TextButton(onClick = diagnostics, enabled = !busy) { Text("진단 기록") }
             }
         } }, confirmButton = { if (contracts.size <= 1) TextButton(onClick = { login(username, password, rememberPassword) }, enabled = !busy && username.isNotBlank() && password.isNotBlank()) { Text("로그인하고 조회") } },
         dismissButton = { TextButton(onClick = close, enabled = !busy) { Text("취소") } })

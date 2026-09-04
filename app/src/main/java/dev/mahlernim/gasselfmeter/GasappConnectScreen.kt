@@ -23,6 +23,7 @@ fun GasappConnectScreen(
     onConnected: (GasappSession, GasappAccount) -> Unit,
     onCancel: () -> Unit,
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val api = remember { GasappApi() }
     val scope = rememberCoroutineScope()
     var name by remember { mutableStateOf("") }
@@ -49,7 +50,7 @@ fun GasappConnectScreen(
         scope.launch {
             try { action() }
             catch (e: CancellationException) { throw e }
-            catch (e: Exception) { error = readableError(e) }
+            catch (e: Exception) { error = readableError(e) + "\n" + Diagnostics.record(context, providerId, "connect", e) }
             finally { busy = false }
         }
     }

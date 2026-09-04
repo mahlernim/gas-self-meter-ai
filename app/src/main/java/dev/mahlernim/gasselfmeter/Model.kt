@@ -64,6 +64,7 @@ data class AppData(
     val cachedGasappTarget: GasappTarget? = null,
     val gasappBills: List<GasappBill> = emptyList(),
     val gasappMeterChangeObservedAt: Long? = null,
+    val samchullyBills: List<SamchullyBill> = emptyList(),
 )
 data class Estimate(val reading: Double?, val daily: Double?, val source: String, val ageDays: Long?, val anchorTime: Long?)
 data class SubmissionDecision(val allowed: Boolean, val value: Double?, val reason: String)
@@ -227,6 +228,14 @@ data class MonthlyHistory(
 
 object HistorySummary {
     fun months(data: AppData, latest: YearMonth, count: Int = 24): List<MonthlyHistory> {
+        if (data.profile.providerId == "samchully") {
+            val bills = data.samchullyBills.associateBy { YearMonth.of(it.billMonth.take(4).toInt(), it.billMonth.takeLast(2).toInt()) }
+            return months(data.periods, latest, count).map { month ->
+                val bill = bills[month.month]
+                val delta = if (bill?.currentReading != null && bill.previousReading != null && bill.currentReading >= bill.previousReading) bill.currentReading - bill.previousReading else null
+                month.copy(usage = delta ?: month.usage, billedAmount = bill?.amount ?: month.billedAmount)
+            }
+        }
         val bills = data.gasappBills.associateBy { YearMonth.parse(it.month) }
         return months(data.periods, latest, count).map { month ->
             val bill = bills[month.month]

@@ -202,7 +202,12 @@ class GasappApi internal constructor(
         if (method != "GET") builder.method(method, (body ?: JSONObject()).toString().toRequestBody("application/json;charset=utf-8".toMediaType()))
         return http.newCall(builder.build()).execute().use { response ->
             if (response.code == 401 || response.code == 418) throw GasappAuthExpired()
-            check(response.isSuccessful) { "가스앱 요청을 처리하지 못했어요. 잠시 후 다시 시도해 주세요. (${response.code})" }
+            if (!response.isSuccessful) throw ProviderFailure(when {
+                path.contains("indication") || path.contains("input") -> "meter"
+                path.contains("bill") -> "bills"
+                path.contains("contract") -> "contracts"
+                else -> "connect"
+            }, "http", response.code)
             val text = response.body?.byteStream()?.readBytesLimited(4_000_000)?.toString(Charsets.UTF_8).orEmpty()
             if (text.isBlank()) JSONObject.NULL else JSONTokener(text).nextValue()
         }

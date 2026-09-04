@@ -8,6 +8,32 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SamchullyClientTest {
+    private fun httpClient(code: Int, body: String) = okhttp3.OkHttpClient.Builder().addInterceptor { chain ->
+        okhttp3.Response.Builder().request(chain.request()).protocol(okhttp3.Protocol.HTTP_1_1)
+            .code(code).message("synthetic")
+            .body(okhttp3.ResponseBody.create(null, body)).build()
+    }.build()
+
+    @Test fun reportsHttpCodeAndLoginStageWithoutReturningResponseBody() {
+        SamchullyReadClient(Providers.get("samchully"), Credentials("synthetic", "synthetic"), httpClient(401, "private body")).use { client ->
+            val failure = assertThrows(ProviderFailure::class.java) { client.login() }
+            assertEquals("login", failure.stage)
+            assertEquals("authentication", failure.category)
+            assertEquals(401, failure.httpCode)
+            assertFalse(failure.message.orEmpty().contains("private body"))
+        }
+    }
+
+    @Test fun reportsBillSchemaFailureForMalformedSuccessfulResponse() {
+        SamchullyReadClient(Providers.get("samchully"), null, httpClient(200, "not-json")).use { client ->
+            val failure = assertThrows(ProviderFailure::class.java) {
+                client.bills(SamchullySession("synthetic", "PER"), "123", java.time.YearMonth.of(2026, 1), java.time.YearMonth.of(2026, 2))
+            }
+            assertEquals("bills", failure.stage)
+            assertEquals("parse", failure.category)
+        }
+    }
+
     @Test fun rejectsInvalidMonthsAndMalformedNumbersInsteadOfRepairingThem() {
         for (month in listOf("202600", "202613")) {
             assertThrows(IllegalArgumentException::class.java) {

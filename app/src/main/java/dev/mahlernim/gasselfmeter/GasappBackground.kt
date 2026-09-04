@@ -45,7 +45,8 @@ internal object GasappBackground {
                 }
                 if (result?.status == "confirmed") context.getSystemService(NotificationManager::class.java).cancel(3)
             } else text = reminderText(data, target, System.currentTimeMillis(), failed = true)
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Diagnostics.record(context, data.profile.providerId, "submit", e)
             data = store.read()
             if (data.cachedGasappTarget?.end == today().toString()) text = reminderText(data, data.cachedGasappTarget, System.currentTimeMillis(), failed = true)
         }

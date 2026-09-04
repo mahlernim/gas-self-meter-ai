@@ -10,7 +10,7 @@ object ProviderRefresh {
     private const val WORK = "provider-daily-refresh"
     fun schedule(context: Context, data: AppData) {
         val manager = WorkManager.getInstance(context)
-        if (!data.ready || (data.gasappConnection == null && (data.credentials == null || !Providers.get(data.profile.providerId).skens))) {
+        if (!data.ready || (data.gasappConnection == null && (data.credentials == null || !Providers.get(data.profile.providerId).passwordConnection))) {
             manager.cancelUniqueWork(WORK)
             return
         }
@@ -26,6 +26,16 @@ object ProviderRefresh {
             if (updated.cachedGasappTarget?.submitted == true) context.getSystemService(android.app.NotificationManager::class.java).cancel(3)
         }
         val credentials = data.credentials ?: return@withLock data
+        if (data.ready && Providers.get(data.profile.providerId).experimentalReadOnly) {
+            if (!force && data.profile.syncTime?.let { System.currentTimeMillis() - it < 86_400_000L } == true) return@withLock data
+            val login = SamchullyBridge.login(credentials)
+            val contract = login.contracts.singleOrNull { it.key == data.profile.contract }
+                ?: throw ProviderFailure("contracts", "provider_mismatch")
+            val snapshot = SamchullyBridge.snapshot(login, contract)
+            return@withLock store.update { latest ->
+                if (BackgroundState.sameAccount(latest, data)) SamchullyBridge.merge(latest, snapshot, credentials) else latest
+            }
+        }
         if (!data.ready || !Providers.get(data.profile.providerId).skens) return@withLock data
         if (!force && data.profile.syncTime?.let { System.currentTimeMillis() - it < 86_400_000L } == true) return@withLock data
         val provider = Providers.skens(data.profile.providerId)
@@ -55,8 +65,11 @@ class ProviderRefreshWorker(context: Context, params: WorkerParameters) : Worker
     override fun doWork(): Result = try {
         ProviderRefresh.refresh(applicationContext)
         Result.success()
-    } catch (_: Exception) { Result.retry() }
+    } catch (e: Exception) {
+        val provider = runCatching { SecureStore(applicationContext).read().profile.providerId }.getOrDefault("unknown")
+        Diagnostics.record(applicationContext, provider, "background", e)
+        Result.retry()
+    }
 }
-
 
 

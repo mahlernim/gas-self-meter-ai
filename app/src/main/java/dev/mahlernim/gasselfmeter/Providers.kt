@@ -11,15 +11,17 @@ data class Provider(
     val automaticSubmission: Boolean = false,
 ) {
     val skens: Boolean get() = skensCode != null
-    val accountRecovery: String get() = "https://www.skens.com/$id/login/find.do"
-    val registration: String get() = "https://www.skens.com/$id/join/type.do"
+    val experimentalReadOnly: Boolean get() = id == "samchully"
+    val passwordConnection: Boolean get() = skens || experimentalReadOnly
+    val accountRecovery: String get() = if (skens) "https://www.skens.com/$id/login/find.do" else website
+    val registration: String get() = if (skens) "https://www.skens.com/$id/join/type.do" else website
 }
 object Providers {
     val all = listOf(
         Provider("busan", "부산도시가스", listOf("부산"), "https://www.skens.com/busan/login/login.do", true, skensCode = "C000", automaticSubmission = true),
         Provider("seoul", "서울도시가스", listOf("서울", "경기"), "https://www.seoulgas.co.kr/", automatic = true, gasapp = true, automaticSubmission = true),
         Provider("yesco", "예스코", listOf("서울", "경기"), "https://www.lsyesco.com/", automatic = true, gasapp = true, automaticSubmission = true),
-        Provider("samchully", "삼천리", listOf("경기", "인천"), "https://www.samchully.co.kr/"),
+        Provider("samchully", "삼천리", listOf("경기", "인천"), "https://cs.samchully.co.kr/", automatic = true),
         Provider("incheon", "인천도시가스", listOf("인천", "경기"), "https://icgas.co.kr:8443/", automatic = true, gasapp = true, automaticSubmission = true),
         Provider("daeryun", "대륜E&S", listOf("서울", "경기"), "https://www.daeryunens.com/", automatic = true, gasapp = true, automaticSubmission = true),
         Provider("kiturami", "귀뚜라미에너지", listOf("서울"), "https://www.kituramienergy.co.kr/", automatic = true, gasapp = true, automaticSubmission = true),
