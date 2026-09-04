@@ -5,6 +5,15 @@ import org.junit.Test
 import org.json.JSONObject
 
 class ProviderAndBackupTest {
+    @Test fun blankCredentialsAreRejectedWithoutChangingValidPasswords() {
+        for ((user, password) in listOf("" to "secret", "user" to "", "  " to "secret", "user" to " \t ")) {
+            assertThrows(IllegalArgumentException::class.java) { Credentials(user, password) }
+        }
+        assertEquals(" secret ", Credentials("user", " secret ").password)
+        val encoded = JSONObject(DataCodec.encode(AppData(), true))
+            .put("credentials", JSONObject().put("username", " ").put("password", "secret"))
+        assertThrows(IllegalArgumentException::class.java) { DataCodec.decode(encoded.toString(), true) }
+    }
     private fun fixture(month: String = "202501", current: String = "120", corrected: String = "20"): String = """
         <html><input id="budat" value="$month">
         <table><tr><th>합계</th><td>18,810</td></tr></table><table></table><table></table><table></table>

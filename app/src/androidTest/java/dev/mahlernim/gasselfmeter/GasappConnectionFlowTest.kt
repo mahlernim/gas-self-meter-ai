@@ -12,7 +12,8 @@ class GasappConnectionFlowTest {
 
     @Test fun supportedProviderOpensPhoneAuthenticationWithoutSendingSms() {
         SecureStore(InstrumentationRegistry.getInstrumentation().targetContext).erase()
-        ActivityScenario.launch(MainActivity::class.java).use {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            compose.awaitStorage(scenario)
             compose.onNodeWithText("부산").performScrollTo().performClick()
             compose.onNodeWithText("서울").performClick()
             compose.onNodeWithText("서울도시가스 연결하기").performScrollTo().performClick()

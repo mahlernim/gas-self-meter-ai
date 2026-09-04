@@ -36,7 +36,9 @@ data class Profile(
     val reminderDay: Int = 7, val reminderHour: Int = 19,
     val reminderRepeatCount: Int = 3, val customerNumber: String = "",
 )
-data class Credentials(val username: String, val password: String)
+data class Credentials(val username: String, val password: String) {
+    init { require(username.isNotBlank() && password.isNotBlank()) { "아이디와 비밀번호를 입력해 주세요." } }
+}
 data class SubmissionSettings(
     val enabled: Boolean = false,
     val automatic: Boolean = false,

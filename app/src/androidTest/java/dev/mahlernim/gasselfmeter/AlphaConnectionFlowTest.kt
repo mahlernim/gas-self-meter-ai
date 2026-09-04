@@ -26,7 +26,8 @@ class AlphaConnectionFlowTest {
     }
 
     @Test fun samchullyOffersExperimentalLoginWithoutSendingCredentials() {
-        ActivityScenario.launch(MainActivity::class.java).use {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            compose.awaitStorage(scenario)
             compose.onNodeWithText("부산").performScrollTo().performClick()
             compose.onNodeWithText("경기").performClick()
             compose.onNodeWithText("서울도시가스").performScrollTo().performClick()
@@ -59,7 +60,8 @@ class AlphaConnectionFlowTest {
         assertTrue(expectedReport.contains("|samchully|bills|http|503"))
         assertFalse(expectedReport.contains(secret))
 
-        ActivityScenario.launch(MainActivity::class.java).use {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            compose.awaitStorage(scenario)
             compose.onNodeWithText("진단 기록").performScrollTo().performClick()
             compose.onNode(hasText("진단 기록") and hasAnyAncestor(isDialog())).assertIsDisplayed()
             compose.onNodeWithText("서버로 자동 전송하지 않습니다.").performScrollTo().assertIsDisplayed()
@@ -88,7 +90,8 @@ class AlphaConnectionFlowTest {
         )
         // No credentials or session means launch and tab navigation cannot refresh the provider.
         SecureStore(context).write(data)
-        ActivityScenario.launch(MainActivity::class.java).use {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            compose.awaitStorage(scenario)
             compose.onNodeWithText("제출", useUnmergedTree = true).performClick()
             compose.onNodeWithText("삼천리 조회 전용").assertIsDisplayed()
             compose.onNodeWithText("삼천리 고객센터").performScrollTo().assertIsDisplayed()

@@ -25,6 +25,7 @@ class AppFlowTest {
     @Test fun onboardingDemoCalibrationPersistenceAndHistory() {
         SecureStore(context).erase()
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            compose.awaitStorage(scenario)
             fun shot(name: String) {
                 scenario.onActivity { activity -> androidx.lifecycle.ViewModelProvider(activity)[GasViewModel::class.java].message = null }
                 screenshot(name)
@@ -32,6 +33,7 @@ class AppFlowTest {
             compose.onNodeWithText("일주일에 한 번,\n우리 집 가스를 알아가요").assertIsDisplayed()
             shot("01-welcome")
             compose.onNodeWithText("예시로 둘러보기").performScrollTo().performClick()
+            compose.awaitStorage(scenario)
             compose.onNodeWithText("예시 데이터 · 실제 우리 집 기록이 아니에요").assertIsDisplayed()
             shot("02-meter")
             compose.onNodeWithText("제출", useUnmergedTree = true).performClick()
