@@ -121,6 +121,7 @@ class MainActivity : ComponentActivity() {
     var diagnostics by remember { mutableStateOf(false) }
     var refreshConfirmation by remember { mutableStateOf(false) }
     var notificationPurpose by remember { mutableStateOf("calibration") }
+    var pendingSubmissionSettings by remember { mutableStateOf<SubmissionSettings?>(null) }
     var submitValue by remember { mutableStateOf<Double?>(null) }
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) { while (true) { now = System.currentTimeMillis(); delay(30_000) } }
@@ -145,7 +146,10 @@ class MainActivity : ComponentActivity() {
         }
     }
     val notification = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (notificationPurpose == "submission") vm.setSubmissionSettings(vm.data.submissionSettings.copy(reminder = granted))
+        if (notificationPurpose == "submission") {
+            vm.setSubmissionSettings((pendingSubmissionSettings ?: vm.data.submissionSettings).copy(reminder = granted))
+            pendingSubmissionSettings = null
+        }
         else vm.setReminder(granted, vm.data.profile.reminderDay, vm.data.profile.reminderHour)
         if (!granted) vm.message = "알림 권한이 꺼져 있어요. 기기 설정에서 허용할 수 있어요."
     }
@@ -186,8 +190,9 @@ class MainActivity : ComponentActivity() {
                     vm.message = "계약자번호 복사됨"
                 }, vm.busy)
                 1 -> SubmissionPage(data, vm.selfReadTarget, now, estimate, vm.busy, vm::checkSubmissionStatus, { value -> submitValue = value }, { settings ->
-                    if (settings.reminder && !data.submissionSettings.reminder && Build.VERSION.SDK_INT >= 33) {
-                        vm.setSubmissionSettings(settings.copy(reminder = false))
+                    if (!vm.busy && settings.reminder && !data.submissionSettings.reminder && Build.VERSION.SDK_INT >= 33 &&
+                        context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                        pendingSubmissionSettings = settings
                         notificationPurpose = "submission"
                         notification.launch(Manifest.permission.POST_NOTIFICATIONS)
                     } else vm.setSubmissionSettings(settings)
