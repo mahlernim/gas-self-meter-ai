@@ -23,6 +23,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -64,6 +65,7 @@ fun EnergyTalkConnectDialog(clientId: String, onDismiss: () -> Unit, onResult: (
     require(clientId in EnergyTalkBoundary.tenants)
     var consented by remember(clientId) { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
+    var requestJob by remember { mutableStateOf<Job?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
     var diagnostic by remember { mutableStateOf<String?>(null) }
     val clipboard = LocalClipboardManager.current
@@ -92,7 +94,8 @@ fun EnergyTalkConnectDialog(clientId: String, onDismiss: () -> Unit, onResult: (
             }
         }
     }
-    Dialog(onDismissRequest = { if (!busy) onDismiss() }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+    fun close() { requestJob?.cancel(); onDismiss() }
+    Dialog(onDismissRequest = ::close, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             Column(Modifier.fillMaxSize().safeDrawingPadding().padding(12.dp)) {
                 Text("에너지톡 실험적 조회", style = MaterialTheme.typography.titleLarge)
@@ -135,19 +138,20 @@ fun EnergyTalkConnectDialog(clientId: String, onDismiss: () -> Unit, onResult: (
                         }
                     })
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        TextButton(enabled = !busy, onClick = onDismiss) { Text("닫기") }
+                        TextButton(onClick = {
+                            if (busy) { requestJob?.cancel(); message = "조회를 취소했어요. 다시 가져올 수 있어요." } else close()
+                        }) { Text(if (busy) "조회 취소" else "닫기") }
                         Button(enabled = !busy, onClick = {
                             val token = candidate.get()
                             if (token == null) { diagnostic = "session_header_missing"; message = "로그인 세션을 확인하지 못했어요. 공식 로그인을 완료하고 주소를 선택해 주세요. 계속 안 되면 이 기기에서는 연결을 지원하지 못해요." }
                             else {
                                 busy = true; message = null; diagnostic = null
-                                scope.launch {
+                                requestJob = scope.launch {
                                     try {
                                         val snapshot = withContext(Dispatchers.IO) { EnergyTalkReadClient().verifyAndRead(token, clientId) }
                                         candidate.set(null)
                                         latestResult(snapshot)
                                     } catch (e: CancellationException) {
-                                        candidate.set(null)
                                         throw e
                                     } catch (_: EnergyTalkAuthException) {
                                         candidate.set(null); diagnostic = "authentication_failed"; message = "로그인 상태를 확인하지 못했어요. 공식 화면에서 다시 로그인해 주세요."

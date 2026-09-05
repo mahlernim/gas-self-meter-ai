@@ -87,4 +87,41 @@ class GasappIntegrationTest {
         val reset = AppData()
         assertEquals(reset, GasappBridge.applyReconciliation(reset, initial, record))
     }
+
+    @Test fun duplicateBillsSurviveRefreshBackupAndRemainSeparateInHistory() {
+        val rows = listOf(GasappBill("2026-08", 12.0, 14000.0, null, null), GasappBill("2026-08", 2.0, 2500.0, null, null))
+        val snapshot = GasappSnapshot(account, rows, emptyList(), target)
+        val first = GasappBridge.merge(data(), connection, snapshot)
+        val second = GasappBridge.merge(first, connection, snapshot)
+        assertEquals(rows, second.gasappBills)
+        assertEquals(rows, DataCodec.decode(DataCodec.encode(second)).gasappBills)
+        val summary = HistorySummary.months(second, YearMonth.of(2026, 9)).last()
+        assertNull(summary.billedAmount)
+        assertNull(summary.usage)
+    }
+
+    @Test fun malformedSubmissionStateStillAllowsBillDisplayAndSurvivesLocalStorage() {
+        val state = GasappApi.parseTarget(org.json.JSONObject("""{"selfInputAvailable":"Y","meterIdNum":"meter","inputYn":"UNKNOWN","mtrDigitCnt":"five"}"""), account)
+        assertNotNull(state.submissionIssue)
+        val bill = GasappBill("2026-08", 12.0, 14000.0, null, null)
+        val merged = GasappBridge.merge(data(), connection, GasappSnapshot(account, listOf(bill), emptyList(), state))
+        assertEquals(listOf(bill), merged.gasappBills)
+        val restored = DataCodec.decode(DataCodec.encode(merged, true), true)
+        assertEquals(state.submissionIssue, restored.cachedGasappTarget?.submissionIssue)
+        assertFalse(GasappSubmissionPolicy.decide(restored, restored.cachedGasappTarget, automatic = false).allowed)
+    }
+
+    @Test fun upgradeKeepsBillsAndManualPeriodsButRemovesLegacyUnverifiedEstimatorCopy() {
+        val bill = GasappBill("2026-08", 12.0, 14000.0, "2026-08-01", "2026-08-31")
+        val manual = UsagePeriod("2026-07-01", "2026-07-31", 11.0, meter)
+        val legacy = UsagePeriod(bill.start!!, bill.end!!, bill.usage!!, meter, billMonth = "202608", amount = bill.amount)
+        val old = data().copy(gasappBills = listOf(bill), periods = listOf(manual, legacy))
+        for (secrets in listOf(false, true)) {
+            val restored = DataCodec.decode(DataCodec.encode(old, secrets), secrets)
+            assertEquals(listOf(bill), restored.gasappBills)
+            assertEquals(listOf(manual), restored.periods)
+        }
+        val manualSameDates = legacy.copy(billMonth = "", amount = null)
+        assertEquals(listOf(manualSameDates), GasappCodec.withoutLegacyBillPeriods(old.copy(periods = listOf(manualSameDates))).periods)
+    }
 }

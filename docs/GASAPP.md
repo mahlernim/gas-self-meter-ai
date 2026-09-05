@@ -14,6 +14,8 @@ SMS request and confirmation, `POST members`, and `POST relay/indications/input`
 
 ## Integration contract
 
+Version 0.4.1 retains experimental access while recording [Alpha assumptions](PROTOCOL_ASSUMPTIONS.md). Missing optional flags use documented defaults. Malformed supplied submission fields produce a submission-specific explanation without rejecting readable bills. Mutation bodies are one-shot, including HTTP 503 follow-ups. Duplicate-month bills remain separate through refresh and backup, and billed usage stays visible without becoming an unverified raw meter interval.
+
 - `GasappConnectScreen` returns a session and selected account. The app stores them in its existing encrypted store and starts normal synchronization. Identity input and OTP are held only in transient UI state.
 - `GasappApi.snapshot` returns typed bill summaries, reading history, and a current target. Missing amounts or usage remain null. The adapter must not replace them with zero or invent a meter identity. AMI comes from the selected contract.
 - Registration and channel change require an explicit user action. The app explains their effect before calling the API.

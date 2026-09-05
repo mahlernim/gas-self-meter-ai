@@ -43,14 +43,13 @@ object GasappBridge {
             if (end < start || b.value < a.value || java.time.temporal.ChronoUnit.DAYS.between(start, end) >= 370) null
             else UsagePeriod(start.toString(), end.toString(), b.value - a.value, meter, a.value, b.value)
         }
-        val datedBills = snapshot.bills.mapNotNull { b ->
-            if (b.start == null || b.end == null || b.usage == null || LocalDate.parse(b.end) > dateOf(now)) null
-            else UsagePeriod(b.start, b.end, b.usage, meter, billMonth = b.month.replace("-", ""), amount = b.amount)
-        }.filter { bill -> intervals.none { it.first <= bill.last && bill.first <= it.last } }
-        val incoming = intervals + datedBills
-        val periods = (data.periods.filter { old -> incoming.none { it.first <= old.last && old.first <= it.last } } + incoming).sortedBy { it.start }
+        // Bills remain visible in history. Dates alone do not establish raw-volume units or meter identity.
+        val incoming = intervals
+        val periods = (GasappCodec.withoutLegacyBillPeriods(data).periods.filter { old -> incoming.none { it.first <= old.last && old.first <= it.last } } + incoming).sortedBy { it.start }
         Estimator.validatePeriods(periods)
-        val bills = (data.gasappBills + snapshot.bills).associateBy { it.month }.values.sortedBy { it.month }.takeLast(600)
+        val refreshedMonths = snapshot.bills.map { it.month }.toSet()
+        val bills = (data.gasappBills.filter { it.month !in refreshedMonths } + snapshot.bills).sortedBy { it.month }
+        require(bills.size <= 600) { "저장할 청구 내역이 너무 많아요. 기존 기록을 유지했어요." }
         return data.copy(profile = data.profile.copy(providerId = providerId, contract = connection.account.key,
             customerNumber = connection.account.customer.ifBlank { connection.account.contract }, meter = meter,
             plannedDate = target.end, syncTime = now), periods = periods, ready = true, credentials = null,
@@ -161,6 +160,7 @@ object GasappSubmissionPolicy {
         if (!Providers.get(data.profile.providerId).gasapp) return deny("가스앱 연결 정보를 확인해 주세요.")
         if (automatic && !data.submissionSettings.automatic) return deny("자가검침 자동제출이 꺼져 있어요.")
         if (target == null) return deny("검침 기간을 먼저 확인해 주세요.")
+        target.submissionIssue?.let { return deny(it) }
         if (target.account.key != connection.account.key || data.profile.contract != target.account.key) return deny("계약 정보가 달라요. 다시 연결해 주세요.")
         if (target.meter == null || target.meter != data.profile.meter) return deny("계량기 정보를 갱신하고 실제 숫자를 다시 확인해 주세요.")
         if (!target.registered) return deny("자가검침 서비스 신청이 필요해요.")

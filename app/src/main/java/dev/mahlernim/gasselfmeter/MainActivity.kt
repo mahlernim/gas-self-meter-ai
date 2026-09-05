@@ -328,6 +328,9 @@ class MainActivity : ComponentActivity() {
                         finally { diagnosticBusy = false }
                     }
                 }) { Text("기록 지우기") }
+                TextButton(enabled = !diagnosticBusy && report != null, onClick = {
+                    report?.let { AlphaFeedback.share(context, it) }
+                }) { Text("피드백 초안 보내기") }
             } },
             confirmButton = { TextButton(enabled = !diagnosticBusy && report != null, onClick = {
                 context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("진단 기록", report))
@@ -655,6 +658,9 @@ class MainActivity : ComponentActivity() {
         ActionButton("과거 사용량 추가", Icons.Outlined.Add, onClick = add)
         Hint(Icons.Outlined.Lightbulb, "작년 같은 달과 앞뒤 달의 이력이 있으면 좋아요. 청구월보다 실제 사용 기간을 정확히 입력해 주세요.")
         if (data.periods.isEmpty() && data.gasappBills.isEmpty()) EmptyNote("아직 사용 이력이 없어요", "공급사 홈페이지나 청구서에서 과거 사용량을 확인해 입력해 주세요.")
+        if (data.gasappBills.isNotEmpty()) Text("공급사 청구 사용량은 참고용이에요. 계량기 지침 추정에는 확인된 지침 차이와 직접 확인한 숫자를 사용해요.", style = MaterialTheme.typography.bodySmall, color = Muted)
+        val repeatedBillMonths = data.gasappBills.groupingBy { it.month }.eachCount().filterValues { it > 1 }.keys
+        if (repeatedBillMonths.isNotEmpty()) Text("같은 달의 청구가 여러 건 있어 모두 표시해요. 합계는 공급사 고지서에서 확인해 주세요.", style = MaterialTheme.typography.bodySmall, color = Muted)
         data.gasappBills.sortedByDescending { it.month }.forEach { bill ->
             Column(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("${bill.month.take(4)}.${bill.month.takeLast(2)} 청구", color = Muted, style = MaterialTheme.typography.labelMedium)

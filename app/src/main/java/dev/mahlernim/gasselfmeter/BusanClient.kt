@@ -30,10 +30,12 @@ data class SelfReadTarget(
     internal val vLdo: String,
     internal val installation: String,
 )
-data class SubmissionOutcome(val accepted: Boolean, val confirmed: Boolean)
+data class SubmissionOutcome(val accepted: Boolean, val confirmed: Boolean, val uncertain: Boolean = false) {
+    val status: String get() = when { confirmed -> "confirmed"; accepted || uncertain -> "uncertain"; else -> "rejected" }
+}
 data class SyncResult(val periods: List<UsagePeriod>, val meter: String, val planned: String?, val warning: String?, val selfRead: SelfReadTarget?)
 
-/** Independent read-only client with an explicit endpoint allowlist. */
+/** Independent client with an explicit endpoint allowlist and one-shot mutations. */
 class SkensClient(private val provider: Provider, private val credentials: Credentials) : AutoCloseable {
     init { require(provider.skens && provider.skensCode != null) { "지원하지 않는 자동 연결 공급사예요." } }
     private val cookies = mutableListOf<Cookie>()
@@ -51,7 +53,10 @@ class SkensClient(private val provider: Provider, private val credentials: Crede
         require(path in allowed)
         val builder = Request.Builder().url("https://ebpp.skens.com/${provider.id}/$path")
             .header("Referer", "https://ebpp.skens.com/${provider.id}/main/index.do")
-        if (data != null) builder.post(FormBody.Builder().apply { data.forEach { (k, v) -> add(k, v) } }.build())
+        if (data != null) {
+            val body = FormBody.Builder().apply { data.forEach { (k, v) -> add(k, v) } }.build()
+            builder.post(if (path == "read/insertSelfRead.do" || path == "login/loginProcess.do") body.oneShot() else body)
+        }
         return client.newCall(builder.build()).execute().use { response ->
             if (!response.isSuccessful) throw ProviderFailure(when {
                 path.startsWith("login/") -> "login"
@@ -92,11 +97,12 @@ class SkensClient(private val provider: Provider, private val credentials: Crede
         check(LocalDate.parse(start) <= LocalDate.parse(end)) { "검침 가능 기간을 확인하지 못했어요." }
         val submittedValue = meterRow.optString("CUST_READING_RESULT").replace(",", "").toDoubleOrNull()?.takeIf { it > 0 }
         val previous = listOf("LAST_READINGRESULT", "HT_READINGRESULT").firstNotNullOfOrNull { key ->
-            meterRow.optString(key).replace(",", "").toDoubleOrNull()
+            meterRow.optString(key).replace(",", "").toDoubleOrNull()?.takeIf { it.isFinite() && it in 0.0..99_999_999.0 }
         }
         return SelfReadTarget(
             cycle = "$start:$end:${opaque(serial)}", start = start, end = end,
-            eligible = !meterRow.optString("selfReadYn").equals("N", true),
+            eligible = meterRow.optString("selfReadYn").trim().equals("Y", true) && previous != null &&
+                meterRow.optString("SELF_READ_YN").trim().uppercase() in setOf("Y", "N"),
             submitted = meterRow.optString("SELF_READ_YN").equals("Y", true) || submittedValue != null,
             submittedValue = submittedValue, previousValue = previous, contract = contract, serial = serial,
             address = meterRow.optString("ADDR"), planned = meterRow.optString("ADATSOLL1"),
@@ -147,18 +153,18 @@ class SkensClient(private val provider: Provider, private val credentials: Crede
         require(target.eligible) { "자가검침 대상 계약이 아니에요." }
         require(!target.submitted) { "이번 검침값은 이미 제출되어 있어요." }
         require(today() in LocalDate.parse(target.start)..LocalDate.parse(target.end)) { "현재는 검침값 입력 기간이 아니에요." }
-        require(target.previousValue == null || value >= target.previousValue) { "이전 검침값보다 작은 값은 제출할 수 없어요." }
-        val response = JSONObject(request("read/insertSelfRead.do", mapOf(
+        require(target.previousValue != null && target.previousValue.isFinite() && value >= target.previousValue) { "이전 검침값과 제출할 값을 확인해 주세요." }
+        val response = runCatching { JSONObject(request("read/insertSelfRead.do", mapOf(
             "bpno" to target.contract.bp, "name" to target.contract.name, "cano" to target.contract.ca,
             "sernr" to target.serial, "addr" to target.address,
             "cust_readingresult" to value.toString(), "adatsoll1" to target.planned,
             "v_ldo" to target.vLdo, "anlage" to target.installation
-        )))
-        val accepted = response.optString("result").trim() == "Y"
-        if (!accepted) return SubmissionOutcome(false, false)
-        val refreshed = selfReadTarget(target.contract)
-        val confirmed = confirmsSubmission(target, refreshed, value)
-        return SubmissionOutcome(true, confirmed)
+        ))) }.getOrNull()
+        val result = response?.optString("result")?.trim()
+        if (result == "N") return SubmissionOutcome(false, false)
+        val refreshed = runCatching { selfReadTarget(target.contract) }.getOrNull()
+        val confirmed = refreshed != null && confirmsSubmission(target, refreshed, value)
+        return SubmissionOutcome(result == "Y", confirmed, uncertain = !confirmed)
     }
     override fun close() { synchronized(cookies) { cookies.clear() }; client.connectionPool.evictAll(); client.dispatcher.executorService.shutdown() }
 

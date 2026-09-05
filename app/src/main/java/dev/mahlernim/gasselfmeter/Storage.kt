@@ -90,7 +90,8 @@ object DataCodec {
             Observation(r.getLong("time"), r.getDouble("reading"), r.getString("meter"), r.optionalDouble("predicted"))
         } }.sortedBy { it.time }
         observations.forEach {
-            require(it.time in dayStart(java.time.LocalDate.of(2000, 1, 1))..System.currentTimeMillis())
+            val latest = if (allowCredentials) dayStart(java.time.LocalDate.of(2100, 1, 1)) else System.currentTimeMillis()
+            require(it.time in dayStart(java.time.LocalDate.of(2000, 1, 1))..latest)
             require(it.reading.isFinite() && it.reading in 0.0..99_999_999.0)
             require(it.meter.length in 1..100)
             require(it.predicted == null || (it.predicted.isFinite() && it.predicted in 0.0..99_999_999.0))
@@ -124,10 +125,11 @@ object DataCodec {
                 Contract(t.getString("bp"), t.getString("ca"), t.optString("name")), t.getString("serial"), t.optString("address"),
                 t.optString("planned"), t.optString("vLdo"), t.optString("installation"))
         } else null
-        return AppData(profile, periods, observations, credentials, settings, submissions, json.optBoolean("ready", true), cached,
+        val decoded = AppData(profile, periods, observations, credentials, settings, submissions, json.optBoolean("ready", true), cached,
             GasappCodec.connection(json, allowCredentials), GasappCodec.target(json, allowCredentials), GasappCodec.bills(json),
             if (allowCredentials && !json.isNull("gasappMeterChangeObservedAt")) json.getLong("gasappMeterChangeObservedAt") else null,
             SamchullyCodec.decode(json))
+        return GasappCodec.withoutLegacyBillPeriods(decoded)
     }
 }
 
@@ -146,8 +148,10 @@ class SecureStore(context: Context) {
     }
     fun read(): AppData = synchronized(monitor) { readLocked() }
     private fun readLocked(): AppData {
-        if (!file.baseFile.exists()) return AppData()
-        val bytes = file.readFully()
+        val bytes = try { file.readFully() } catch (e: java.io.FileNotFoundException) {
+            if (file.baseFile.exists() || File(file.baseFile.path + ".bak").exists()) throw e
+            return AppData()
+        }
         require(bytes.size in 29..2_500_000 && bytes[0].toInt() == 1) { "저장 파일 형식을 확인할 수 없어요." }
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, bytes.copyOfRange(1, 13)))

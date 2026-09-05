@@ -87,6 +87,8 @@ object SubmissionPolicy {
             return SubmissionDecision(false, null, "계량기가 변경되었어요. 공급사를 새로고침하고 실제 숫자를 다시 확인해 주세요.")
         }
         if (!target.eligible) return SubmissionDecision(false, null, "이 계약은 자가검침 대상이 아니에요.")
+        if (target.previousValue == null || !target.previousValue.isFinite() || target.previousValue < 0)
+            return SubmissionDecision(false, null, "공급사의 이전 검침값을 확인하지 못했어요. 조회를 갱신해 주세요.")
         if (target.submitted) return SubmissionDecision(false, target.submittedValue, "이번 검침값은 이미 입력되어 있어요.")
         val date = dateOf(time)
         val start = LocalDate.parse(target.start)
@@ -107,7 +109,7 @@ object SubmissionPolicy {
         val estimated = Estimator.estimate(data, time).reading
             ?: return SubmissionDecision(false, null, "제출할 현재 누적 지침을 계산할 수 없어요.")
         val value = kotlin.math.round(estimated * 10.0) / 10.0
-        if (target.previousValue != null && value < target.previousValue) return SubmissionDecision(false, value, "계산한 값이 공급사의 이전 검침값보다 작아 입력하지 않아요.")
+        if (value < target.previousValue) return SubmissionDecision(false, value, "계산한 값이 공급사의 이전 검침값보다 작아 입력하지 않아요.")
         val reason = if (automatic) "오늘은 검침 기간 마지막 날이며, 마지막 실측 확인이 ${age}일 전이에요." else "검침 기간과 기존 입력 여부를 확인했어요."
         return SubmissionDecision(true, value, reason)
     }
@@ -248,7 +250,7 @@ object Estimator {
         val evidence = span / (span + 7.0)
         val daysSince = if (last != null) (time - last.time) / 86_400_000.0 else Double.POSITIVE_INFINITY
         val priorInterval = if (first != null && last != null) integrate(first.time, last.time) { seasonalAt(it) } else null
-        val ratio = if (priorInterval != null && priorInterval > .01 && recent != null) ((last!!.reading - first!!.reading) / priorInterval).coerceIn(0.0, 5.0) else null
+        val ratio = if (priorInterval != null && priorInterval > .01 && recent != null) (recent * span / priorInterval).coerceIn(0.0, 5.0) else null
         // The in-window ratio already corrects the same seasonal shape, so the learned bias applies
         // only where that ratio could not be formed. Otherwise one deviation would be counted twice.
         val bias = if (ratio == null) calibrationBias(data, minOf(time, evidenceUntil)) else null
@@ -319,9 +321,11 @@ object HistorySummary {
                 month.copy(usage = delta ?: month.usage, billedAmount = bill?.amount ?: month.billedAmount)
             }
         }
-        val bills = data.gasappBills.associateBy { YearMonth.parse(it.month) }
+        val bills = data.gasappBills.groupBy { YearMonth.parse(it.month) }
         return months(data.periods, latest, count).map { month ->
-            val bill = bills[month.month]
+            val rows = bills[month.month]
+            if (rows != null && rows.size > 1) return@map month.copy(billedAmount = null)
+            val bill = rows?.singleOrNull()
             month.copy(usage = bill?.usage ?: month.usage, billedAmount = bill?.amount ?: month.billedAmount)
         }
     }

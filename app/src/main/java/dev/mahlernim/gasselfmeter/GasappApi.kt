@@ -52,6 +52,7 @@ data class GasappTarget(
     val start: String?, val end: String?, val meter: String?, val previous: Double?,
     val digits: Int?, val needsChannelChange: Boolean, val meterChanged: Boolean,
     val submitted: Boolean, val submittedValue: Double?,
+    val submissionIssue: String? = null,
 ) {
     val cycle: String get() = "${account.key}:$meter:$start:$end"
 }
@@ -167,6 +168,7 @@ class GasappApi internal constructor(
     /** Caller must persist a pending record BEFORE this method and reconcile it instead of resending. */
     fun submit(session: GasappSession, expected: GasappTarget, value: Double, date: LocalDate = LocalDate.now(Korea)): GasappSubmitResult {
         val fresh = target(session, expected.account)
+        require(fresh.submissionIssue == null) { fresh.submissionIssue.orEmpty() }
         require(sameTarget(expected, fresh)) { "계약이나 계량기 정보가 변경됐어요. 다시 확인해 주세요." }
         require(fresh.registered && fresh.eligible && !fresh.needsChannelChange && !fresh.submitted) { "현재 제출 가능한 상태가 아니에요." }
         require(fresh.start != null && fresh.end != null && date >= LocalDate.parse(fresh.start) && date <= LocalDate.parse(fresh.end)) { "자가검침 입력 기간이 아니에요." }
@@ -195,11 +197,11 @@ class GasappApi internal constructor(
         val builder = Request.Builder().url(url).header("Accept", "application/json, text/plain, */*")
             .header("Accept-Language", "ko-KR,ko;q=0.9").header("Origin", "https://app.gasapp.co.kr")
             .header("Referer", "https://app.gasapp.co.kr/").header("X-VERSION", "11.5.1505")
-            .header("X-WEBVERSION", "6.10.548").header("X-PLATFORM", "android")
+            .header("X-WEBVERSION", "6.10.549").header("X-PLATFORM", "android")
             .header("User-Agent", "WunderFlo Appstore/11.5.1505")
             .header("X-TOKEN", session?.token.orEmpty()).header("X-MEMBER", session?.member.orEmpty())
             .header("X-COMPANY", company).header("X-ADID", session?.deviceId ?: deviceId).header("X-TID", "")
-        if (method != "GET") builder.method(method, (body ?: JSONObject()).toString().toRequestBody("application/json;charset=utf-8".toMediaType()))
+        if (method != "GET") builder.method(method, (body ?: JSONObject()).toString().toRequestBody("application/json;charset=utf-8".toMediaType()).oneShot())
         return http.newCall(builder.build()).execute().use { response ->
             if (response.code == 401 || response.code == 418) throw GasappAuthExpired()
             if (!response.isSuccessful) throw ProviderFailure(when {
@@ -236,7 +238,7 @@ class GasappApi internal constructor(
             YearMonth.parse(month)
             GasappBill(month, decimal(row, "useQty", "usageQty"), decimal(row, "chargeAmtQty", "chargeAmt"),
                 date(row, "useStartDate"), date(row, "useEndDate"))
-        }.distinctBy { it.month }.sortedBy { it.month }.takeLast(24)
+        }.sortedBy { it.month }.also { require(it.size <= 600) { "청구 내역이 너무 많아요." } }
 
         fun parseReadings(payload: Any): List<GasappReading> = objects(payload, "history").mapNotNull(::parseReading)
         private fun parseReading(row: JSONObject): GasappReading? {
@@ -249,6 +251,13 @@ class GasappApi internal constructor(
             val unwrapped = unwrap(payload)
             if (unwrapped == JSONObject.NULL) return GasappTarget(account, false, false, null, null, null, null, null, false, false, false, null)
             val row = obj(unwrapped)
+            val problems = mutableListOf<String>()
+            fun state(value: Any?, label: String): Boolean = when (value?.toString()?.trim()?.lowercase()) {
+                null, "null", "" -> false // Alpha default for omitted optional flags, not an authenticated guarantee.
+                "y", "true", "1" -> true
+                "n", "false", "0" -> false
+                else -> { problems += label; false }
+            }
             check(listOf("selfInputAvailable", "periodStart", "meterIdNum").any(row::has)) { "자가검침 상태를 확인하지 못했어요." }
             string(row, "useContractNum")?.let { check(it == account.contract) { "조회된 계약이 달라요." } }
             string(row, "customerNum")?.let { check(it == account.customer) { "조회된 고객번호가 달라요." } }
@@ -256,11 +265,20 @@ class GasappApi internal constructor(
             val end = date(row, "periodEnd")
             check(start == null || end == null || start <= end) { "자가검침 기간을 확인하지 못했어요." }
             val value = decimal(row, "thisMonthIndicatorCustomer", "thisMonthIndicator")
-            val submitted = flag(row.opt("inputYn")) || flag(row.opt("selfInputYn")) || value != null
-            return GasappTarget(account, true, flag(row.opt("selfInputAvailable")), start, end,
+            val submittedA = state(row.opt("inputYn"), "제출 상태")
+            val submittedB = state(row.opt("selfInputYn"), "제출 상태")
+            val eligible = state(row.opt("selfInputAvailable"), "검침 가능 여부")
+            val channel = state(row.opt("needChangeRegisteredChannel"), "검침 채널")
+            val change = row.opt("meterChange")
+            if (change != null && change != JSONObject.NULL && change !is JSONObject) problems += "계량기 교체 정보"
+            val changed = state(row.optJSONObject("meterChange")?.opt("changeYn"), "계량기 교체 여부")
+            val rawDigits = string(row, "mtrDigitCnt")
+            val digits = rawDigits?.toIntOrNull()?.takeIf { it in 1..20 }
+            if (rawDigits != null && digits == null) problems += "계량기 자릿수"
+            return GasappTarget(account, true, eligible, start, end,
                 string(row, "meterIdNum")?.let { gasappHash("meter:${account.company}:$it") }, decimal(row, "lastMonthIndicatorQty"),
-                string(row, "mtrDigitCnt")?.toIntOrNull()?.also { require(it in 1..20) },
-                flag(row.opt("needChangeRegisteredChannel")), flag(row.optJSONObject("meterChange")?.opt("changeYn")), submitted, value)
+                digits, channel, changed, submittedA || submittedB || value != null, value,
+                if (problems.isEmpty()) null else "${problems.distinct().joinToString()} 형식을 확인하지 못했어요. 조회는 계속 이용하고 제출 전 다시 갱신해 주세요.")
         }
 
         fun sameTarget(a: GasappTarget, b: GasappTarget) = a.account.key == b.account.key && a.meter != null && a.meter == b.meter &&
@@ -294,6 +312,5 @@ class GasappApi internal constructor(
         private fun date(row: JSONObject, vararg keys: String): String? = string(row, *keys)?.let {
             if (it.matches(Regex("[0-9]{8}"))) LocalDate.parse(it, DateTimeFormatter.BASIC_ISO_DATE).toString() else LocalDate.parse(it.take(10)).toString()
         }
-        private fun flag(value: Any?): Boolean = value == true || value?.toString()?.uppercase() == "Y" || value?.toString()?.lowercase() == "true"
     }
 }
