@@ -10,13 +10,17 @@ For a target date, use the corresponding month one year earlier. Interpolate its
 
 ## Recent calibration
 
-Use the latest two physical observations for the active meter that are at least one day and at most 28 days apart. Compute their actual volume difference and the integrated seasonal baseline over that interval. When the baseline exceeds 0.01 m³, their ratio is capped between 0 and 5. Shrink that ratio toward 1 with weight
+Use the latest physical observation for the active meter and earlier checks between one and 28 days before it. The recent daily rate is the median of all positive-time pairwise slopes in this window, clamped to zero if negative. This can reduce an isolated intermediate misreading's influence on the recent rate, but does not protect the latest anchor or the seasonal ratio from every outlier.
+
+Compute the actual volume difference between the earliest and latest checks in the window and the integrated seasonal baseline over that interval. When the baseline exceeds 0.01 m³, their ratio is capped between 0 and 5. Shrink that ratio toward 1 with weight
 
 ```
 spanDays / (spanDays + 7) * clamp(1 - daysSinceLatestObservation / 28, 0, 1)
 ```
 
-The seasonal rate is multiplied by `1 + weight * (ratio - 1)`. Decay is evaluated on each integrated date, so later projections do not retroactively reduce the elapsed cumulative consumption. If the seasonal baseline is near zero, blend the daily rates instead while recent observations are fresh. These guardrails are engineering choices and are not calibrated prediction intervals.
+The seasonal rate is multiplied by `1 + weight * (ratio - 1)`. Decay is evaluated on each integrated date, so later projections do not retroactively reduce the elapsed cumulative consumption. If the seasonal ratio is unavailable, blend the recent rate with the bias-corrected seasonal rate. The recent blend decreases linearly to zero over 14 days rather than stopping at a step. These guardrails are engineering choices and are not calibrated prediction intervals.
+
+When the in-window seasonal ratio is unavailable, stored pre-check forecasts can supply a multiplicative calibration bias. For up to 12 comparable checks, compare actual and predicted increments from the preceding anchor. Each increment must be at least 0.5 m³. Average their log ratios with a 0.7 decay per older usable sample, exponentiate, and clamp the multiplier to [0.5, 2]. Do not apply this correction alongside the seasonal ratio because that would count the same deviation twice. The stored forecasts can come from earlier app versions, and this learning rule is not evidence of improved real-household accuracy. Monthly seasonal rates are memoized within each estimate call.
 
 Without seasonal history, use the recent observed daily rate for no more than 14 days after the last physical observation. A single physical reading is an anchor, not enough evidence to infer a consumption rate. A latest anchor older than 60 days disables estimates even with seasonal history.
 
@@ -37,5 +41,11 @@ When available, the latest bill supplies an effective cost per raw m³ from its 
 ## Accuracy and limits
 
 No household-level forecast-accuracy claim has been validated. Weekly readings are recommended, not required by a demonstrated optimal schedule. Weather, occupancy, hot-water patterns, heating changes, partial month coverage and reading-time uncertainty can all shift the result. The app does not claim that the 0.1 m³ adjustment step implies that level of forecast accuracy.
+
+### Historical prediction differences in 0.4.0
+
+The dashboard reports the mean and maximum absolute difference between a physical check and its stored pre-check forecast. It uses the current meter only, excludes future checks and checks older than 90 days, and keeps up to 12 distinct Korean calendar days. At least three comparable days are required. Exact duplicates count once, conflicting records at the same timestamp are excluded, and only the earliest comparable check on each day is retained so repeated corrections cannot inflate the sample count. Invalid or missing values are omitted. The comparison date range and sample count are shown.
+
+This is a descriptive history, not an error bound around today's estimate, a confidence interval, a same-horizon benchmark or a guarantee of submission safety. Check intervals and model versions can differ. The summary never recomputes historical forecasts using later observations, changes estimates, or changes manual or automatic submission decisions. A calibrated uncertainty interval and its submission-policy implications remain separate work under issue #42.
 
 See the estimator and parser tests for partial-day integration, seasonal adjustment, cold start, stale observations, zero consumption, leap months, meter replacement, corrections, overlap rejection, and year-boundary bill parsing.
