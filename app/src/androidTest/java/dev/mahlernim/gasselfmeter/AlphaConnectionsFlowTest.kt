@@ -105,4 +105,26 @@ class AlphaConnectionsFlowTest {
         compose.runOnIdle { assertEquals(1, calls.get()) }
         assertFalse(Diagnostics.report(context).contains(privateMessage))
     }
+
+    @Test fun runningLookupCanBeCancelledAndRetriedWithoutStaleResult() {
+        val calls = AtomicInteger()
+        val cancellations = AtomicInteger()
+        show { _, _, _ ->
+            if (calls.incrementAndGet() == 1) {
+                try { kotlinx.coroutines.awaitCancellation() }
+                finally { cancellations.incrementAndGet() }
+            }
+            AlphaProbeResult(listOf("재시도 합성 결과"), "합성 진단")
+        }
+        customer().performScrollTo().performTextInput("123456789")
+        consent().performScrollTo().performClick()
+        compose.onNodeWithText(runText).performClick()
+        compose.onNodeWithText("조회 취소").assertIsEnabled().performClick()
+        compose.onNodeWithText("조회를 취소했어요. 다시 실행할 수 있어요.").performScrollTo().assertIsDisplayed()
+        consent().performScrollTo().assertIsOff().performClick()
+        compose.onNodeWithText(runText).performClick()
+        compose.onNodeWithText("재시도 합성 결과").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("피드백 초안 보내기").performScrollTo().assertIsDisplayed()
+        compose.runOnIdle { assertEquals(2, calls.get()); assertEquals(1, cancellations.get()) }
+    }
 }

@@ -15,6 +15,21 @@ class ViewModelStorageFlowTest {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val app get() = instrumentation.targetContext.applicationContext as Application
 
+    @Test fun atomicBackupRecoversBeforeReturningEmptyData() {
+        val store = SecureStore(app)
+        val base = java.io.File(app.filesDir, "gas-state.enc")
+        val backup = java.io.File(app.filesDir, "gas-state.enc.bak")
+        try {
+            val expected = AppData(profile = Profile(customerNumber = "synthetic-account"), ready = true)
+            store.write(expected)
+            assertTrue(base.renameTo(backup))
+            assertFalse(base.exists())
+            assertEquals(expected, store.read())
+            assertTrue(base.exists())
+            assertFalse(backup.exists())
+        } finally { store.erase() }
+    }
+
     @Test fun localTransactionsCommitBeforeCallbacksAndRejectOverlappingEdits() {
         SecureStore(app).write(AppData(ready = true))
         val owner = ViewModelStore()

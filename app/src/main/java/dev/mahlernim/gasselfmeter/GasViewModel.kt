@@ -283,7 +283,7 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
                             }
                             viewModelScope.launch { setProgress(2, 4, "검침값을 한 번만 전송하는 중") }
                             val outcome = client.submitReading(target, value)
-                            val status = when { !outcome.accepted -> "rejected"; outcome.confirmed -> "confirmed"; else -> "uncertain" }
+                            val status = outcome.status
                             val detail = when (status) {
                                 "confirmed" -> "공급사에서 입력 완료를 확인했어요."
                                 "rejected" -> "공급사가 입력을 받지 않았어요."

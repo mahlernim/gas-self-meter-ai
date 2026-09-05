@@ -10,9 +10,9 @@ For a target date, use the corresponding month one year earlier. Interpolate its
 
 ## Recent calibration
 
-Use the latest physical observation for the active meter and earlier checks between one and 28 days before it. The recent daily rate is the median of all positive-time pairwise slopes in this window, clamped to zero if negative. This can reduce an isolated intermediate misreading's influence on the recent rate, but does not protect the latest anchor or the seasonal ratio from every outlier.
+Use the latest physical observation for the active meter and earlier checks between one and 28 days before it. The recent daily rate is the median of all positive-time pairwise slopes in this window, clamped to zero if negative. This reduces an isolated misreading's influence on both the recent rate and seasonal calibration. The latest cumulative anchor itself still needs a correct physical reading.
 
-Compute the actual volume difference between the earliest and latest checks in the window and the integrated seasonal baseline over that interval. When the baseline exceeds 0.01 m³, their ratio is capped between 0 and 5. Shrink that ratio toward 1 with weight
+Multiply the robust recent daily rate by the window's elapsed days and compare that volume with the integrated seasonal baseline over the same interval. When the baseline exceeds 0.01 m³, their ratio is capped between 0 and 5. Shrink that ratio toward 1 with weight
 
 ```
 spanDays / (spanDays + 7) * clamp(1 - daysSinceLatestObservation / 28, 0, 1)

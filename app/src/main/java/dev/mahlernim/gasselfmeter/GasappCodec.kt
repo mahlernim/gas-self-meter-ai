@@ -11,6 +11,19 @@ class GasappConnection(val session: GasappSession, val account: GasappAccount) {
 
 /** Sessions and cached account details are included only in the encrypted device store. */
 object GasappCodec {
+    /** Remove only the exact bill-derived shape written by older versions. The bill stays visible. */
+    internal fun withoutLegacyBillPeriods(data: AppData): AppData {
+        if (!Providers.get(data.profile.providerId).gasapp || data.gasappBills.isEmpty()) return data
+        val retained = data.periods.filterNot { period ->
+            period.previous == null && period.current == null && period.billMonth.isNotBlank() &&
+                period.unitCost == null && period.baseCost == null && data.gasappBills.any { bill ->
+                    bill.start == period.start && bill.end == period.end && bill.usage == period.usage &&
+                        bill.amount == period.amount && bill.month.replace("-", "") == period.billMonth
+                }
+        }
+        return if (retained.size == data.periods.size) data else data.copy(periods = retained)
+    }
+
     private fun account(a: GasappAccount) = JSONObject().put("company", a.company).put("customer", a.customer)
         .put("contract", a.contract).put("label", a.label).put("ami", a.ami)
     private fun account(j: JSONObject) = GasappAccount(j.getString("company"), j.getString("customer"),
@@ -32,7 +45,7 @@ object GasappCodec {
             .put("registered", t.registered).put("eligible", t.eligible).put("start", t.start).put("end", t.end)
             .put("meter", t.meter).put("previous", t.previous).put("digits", t.digits)
             .put("needsChannelChange", t.needsChannelChange).put("meterChanged", t.meterChanged)
-            .put("submitted", t.submitted).put("submittedValue", t.submittedValue)) }
+            .put("submitted", t.submitted).put("submittedValue", t.submittedValue).put("submissionIssue", t.submissionIssue)) }
     }
     fun connection(json: JSONObject, secrets: Boolean): GasappConnection? = if (!secrets) null else
         json.optJSONObject("gasappConnection")?.let { GasappConnection(
@@ -42,7 +55,8 @@ object GasappCodec {
             j.getBoolean("registered"), j.getBoolean("eligible"), j.date("start"), j.date("end"),
             if (j.isNull("meter")) null else j.getString("meter"), j.number("previous"),
             if (j.isNull("digits")) null else j.getInt("digits").also { require(it in 1..20) },
-            j.getBoolean("needsChannelChange"), j.getBoolean("meterChanged"), j.getBoolean("submitted"), j.number("submittedValue")) }
+            j.getBoolean("needsChannelChange"), j.getBoolean("meterChanged"), j.getBoolean("submitted"), j.number("submittedValue"),
+            if (j.isNull("submissionIssue")) null else j.getString("submissionIssue").take(300)) }
     fun bills(json: JSONObject): List<GasappBill> {
         val rows = json.optJSONArray("gasappBills") ?: return emptyList()
         require(rows.length() <= 600)

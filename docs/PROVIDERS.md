@@ -1,5 +1,9 @@
 # Korean gas-provider integration research
 
+## Alpha iteration policy from 0.4.1
+
+Experimental connections ship from documented protocol observations and reasonable assumptions, then improve through tester feedback. Missing account-level validation alone does not block an Alpha release. Keep uncertainty visible and collect successful as well as failed outcomes. Malformed mutation prerequisites, mismatched identities and duplicate transmission are implementation defects to fix, while optional missing fields can use documented defaults. See [current assumptions](PROTOCOL_ASSUMPTIONS.md) and [the 0.4.1 feedback guide](ALPHA_0.4.1.md). Earlier account acceptance lists remain follow-up work, not a blanket prerequisite for exposing Alpha connections.
+
 ## 0.4.0 catalog expansion and evidence boundaries
 
 The catalog includes 31 named entries representing the 34 company rows in the [KOGAS directory](https://www.kogas.or.kr/site/koGas/1020408040000), checked September 4, 2026. Four Chambit companies remain grouped under one stable catalog ID. This is catalog coverage, not verified account or submission coverage.

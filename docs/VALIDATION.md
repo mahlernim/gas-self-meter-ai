@@ -55,3 +55,11 @@ CI runs the JVM tests, lint and a fresh debug build. Instrumentation and the aut
 No non-SK account integration, physical handset, week-long background-delay behavior, or household forecast accuracy was validated. Android 8.0 is the supported build minimum, not a claim that every OS version was exercised. The published release must pass the remaining clean-install and downloaded-asset integrity checks in [the release procedure](RELEASING.md).
 
 The automated test fixture values are synthetic. Tests do not register accounts, request SMS codes, submit readings or pay bills.
+
+## 0.4.1 validation on September 5, 2026
+
+The release source passed 148 unit tests, Android lint with zero errors, a debug build and 23 synthetic Android flow tests on an API 35 emulator. The optional live-account probe was explicitly excluded. Lint warnings are retained as follow-up cleanup.
+
+Regression coverage includes one-shot submission under HTTP 503, unknown receipt reconciliation, malformed Gasapp fields with usable bill display, duplicate-month refresh and backup, old bill-derived period migration, local clock rollback, AtomicFile backup recovery, integrated robust seasonal calibration, and cancellation followed by retry. The update signing tool also rejects missing signing files without creating a key.
+
+These checks support Alpha iteration. They do not assert successful customer transactions or proven forecast accuracy for every supplier. Account outcomes are collected through the feedback flow described in [the Alpha guide](ALPHA_0.4.1.md).

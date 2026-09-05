@@ -17,6 +17,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -87,6 +88,7 @@ internal object AlphaConnections {
     var password by remember { mutableStateOf("") }
     var consent by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
+    var requestJob by remember { mutableStateOf<Job?>(null) }
     var result by remember { mutableStateOf<AlphaProbeResult?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var copied by remember { mutableStateOf(false) }
@@ -109,7 +111,8 @@ internal object AlphaConnections {
     }
     val quickBill = providerId == "knenergy"
     val valid = if (quickBill) identity.trim().matches(Regex("[0-9]{1,9}")) else identity.isNotBlank() && password.isNotBlank()
-    AlertDialog(onDismissRequest = { if (!busy) onDismiss() },
+    fun close() { requestJob?.cancel(); onDismiss() }
+    AlertDialog(onDismissRequest = ::close,
         title = { Text("알파 연결 실험실") },
         text = {
             Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -160,17 +163,20 @@ internal object AlphaConnections {
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 result?.lines?.forEach { Text(it) }
                 val report = result?.feedback ?: error
-                if (report != null) TextButton(onClick = {
+                if (report != null) {
+                TextButton(onClick = {
                     context.getSystemService(ClipboardManager::class.java).setPrimaryClip(
                         ClipData.newPlainText("알파 연결 점검", "앱 ${BuildConfig.VERSION_NAME}\n$report"))
                     copied = true
                 }) { Text(if (copied) "진단 요약 복사됨" else "개인정보 없는 진단 요약 복사") }
+                TextButton(onClick = { AlphaFeedback.share(context, report) }) { Text("피드백 초안 보내기") }
+                }
             }
         },
         confirmButton = { if (!energyMode) TextButton(enabled = !busy && consent && valid, onClick = {
             busy = true; result = null; error = null; copied = false
             val selected = providerId; val input = identity; val secret = password
-            scope.launch {
+            requestJob = scope.launch {
                 try { result = runCheck(selected, input, secret) }
                 catch (e: CancellationException) { throw e }
                 catch (e: Exception) {
@@ -178,6 +184,8 @@ internal object AlphaConnections {
                 } finally { password = ""; busy = false; consent = false }
             }
         }) { Text("조회 실험 실행") } },
-        dismissButton = { TextButton(enabled = !busy, onClick = onDismiss) { Text("닫기") } },
+        dismissButton = { TextButton(onClick = {
+            if (busy) { requestJob?.cancel(); error = "조회를 취소했어요. 다시 실행할 수 있어요." } else close()
+        }) { Text(if (busy) "조회 취소" else "닫기") } },
     )
 }
