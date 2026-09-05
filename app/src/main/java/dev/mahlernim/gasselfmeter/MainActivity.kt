@@ -185,9 +185,14 @@ class MainActivity : ComponentActivity() {
             } else if (!data.ready) {
                 Welcome(vm.busy, { vm.manual(it) }, { loginProviderId = it }, { vm.loadDemo() }, { importer.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) }, ::open, { diagnostics = true })
             } else when (tab) {
-                0 -> Dashboard(data, estimate, now, { calibration = decimalText(estimate.reading).takeIf { estimate.reading != null } ?: "" }, { tab = 2 }, { refreshConfirmation = true }, {
-                    (context.getSystemService(ClipboardManager::class.java)).setPrimaryClip(ClipData.newPlainText("계약자번호", data.profile.customerNumber))
-                    vm.message = "계약자번호 복사됨"
+                0 -> Dashboard(data, estimate, now, { calibration = decimalText(estimate.reading).takeIf { estimate.reading != null } ?: "" }, { tab = 2 }, { refreshConfirmation = true }, { label, value ->
+                    val clip = ClipData.newPlainText(label, value).apply {
+                        description.extras = android.os.PersistableBundle().apply {
+                            putBoolean("android.content.extra.IS_SENSITIVE", true)
+                        }
+                    }
+                    context.getSystemService(ClipboardManager::class.java).setPrimaryClip(clip)
+                    vm.message = "$label 복사됨"
                 }, vm.busy)
                 1 -> SubmissionPage(data, vm.selfReadTarget, now, estimate, vm.busy, vm::checkSubmissionStatus, { value -> submitValue = value }, { settings ->
                     if (!vm.busy && settings.reminder && !data.submissionSettings.reminder && Build.VERSION.SDK_INT >= 33 &&
@@ -415,7 +420,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@Composable private fun Dashboard(data: AppData, estimate: Estimate, now: Long, onCheck: () -> Unit, onHistory: () -> Unit, onRefresh: () -> Unit, copyCustomerNumber: () -> Unit, busy: Boolean) {
+@Composable private fun Dashboard(data: AppData, estimate: Estimate, now: Long, onCheck: () -> Unit, onHistory: () -> Unit, onRefresh: () -> Unit, copyInfo: (String, String) -> Unit, busy: Boolean) {
     val provider = Providers.get(data.profile.providerId)
     val latest = data.periods.filter { it.meter == data.profile.meter && it.current != null && dayStart(it.last.plusDays(1)) <= now }.maxByOrNull { it.end }
     val usage = if (latest?.current != null && estimate.reading != null) (estimate.reading - latest.current).takeIf { it >= 0 } else null
@@ -426,14 +431,7 @@ class MainActivity : ComponentActivity() {
             Image(painterResource(R.drawable.app_icon), "똑똑 앱 아이콘", Modifier.size(48.dp).clip(CircleShape))
         }
         if (data.profile.meter == "demo") Badge("예시 데이터 · 실제 우리 집 기록이 아니에요", Color(0xFFFFE5D9))
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(provider.name, color = Muted, style = MaterialTheme.typography.labelLarge)
-            Spacer(Modifier.weight(1f))
-            if (data.profile.customerNumber.isNotBlank()) {
-                Text(data.profile.customerNumber, style = MaterialTheme.typography.labelLarge)
-                IconButton(onClick = copyCustomerNumber, modifier = Modifier.size(40.dp)) { Icon(Icons.Outlined.ContentCopy, "계약자번호 복사", Modifier.size(18.dp)) }
-            }
-        }
+        Text(provider.name, color = Muted, style = MaterialTheme.typography.labelLarge)
         Card(shape = RoundedCornerShape(28.dp), colors = CardDefaults.cardColors(containerColor = DeepTeal), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.fillMaxWidth().padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Text("AI 추정 지침", color = Color(0xFFC1E1D9), style = MaterialTheme.typography.titleMedium)
@@ -479,15 +477,45 @@ class MainActivity : ComponentActivity() {
                 if (futureCost != null) Text("예상 당월 요금 ${decimalText(futureCost, 0)}원", fontWeight = FontWeight.SemiBold)
             }
         }
+        HouseholdInfoCard(data, onRefresh, copyInfo, busy)
         Hint(Icons.Outlined.EventAvailable, when {
             estimate.ageDays == null -> "계량기의 누적 숫자를 입력해 주세요. 작년 이력도 있으면 바로 추정할 수 있어요."
             estimate.ageDays >= 7 -> "최근 확인 기준 ${estimate.ageDays}일이 지났어요. 이번 주 숫자를 확인해 주세요."
             else -> "최근 확인 기준 ${estimate.ageDays}일 전. 일주일에 한 번 실제 숫자를 알려주세요."
         })
         TextButton(onClick = onHistory, modifier = Modifier.fillMaxWidth()) { Text("사용 추이 보기"); Icon(Icons.Outlined.ChevronRight, null) }
-        if (data.profile.syncTime != null) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("최근 조회 ${dateOf(data.profile.syncTime)}", style = MaterialTheme.typography.bodySmall, color = Muted)
-            TextButton(onClick = onRefresh, enabled = !busy) { Icon(Icons.Outlined.Refresh, null, Modifier.size(18.dp)); Text("공급사 정보 갱신") }
+    }
+}
+
+@Composable private fun HouseholdInfoCard(data: AppData, onRefresh: () -> Unit, copyInfo: (String, String) -> Unit, busy: Boolean) {
+    val items = householdInfo(data)
+    if (items.isEmpty() && data.profile.syncTime == null) return
+    Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = Color.White), modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+            Text("우리 집 정보", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(bottom = 4.dp))
+            items.forEach { (label, value) ->
+                Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f).padding(vertical = 5.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(label, color = Muted, style = MaterialTheme.typography.labelMedium)
+                        Text(value, style = MaterialTheme.typography.bodyMedium)
+                    }
+                    IconButton(onClick = { copyInfo(label, value) }, modifier = Modifier.size(48.dp)) {
+                        Icon(Icons.Outlined.ContentCopy, "$label 복사", Modifier.size(18.dp), tint = Teal)
+                    }
+                }
+            }
+            data.profile.syncTime?.let { time ->
+                if (items.isNotEmpty()) HorizontalDivider(color = Pale, modifier = Modifier.padding(top = 4.dp))
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("최근 조회\n${dateOf(time)}", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = Muted)
+                    TextButton(onClick = onRefresh, enabled = !busy) {
+                        Icon(Icons.Outlined.Refresh, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("공급사 정보 갱신")
+                    }
+                }
+            }
         }
     }
 }
