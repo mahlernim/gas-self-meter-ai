@@ -109,7 +109,7 @@ fun EnergyTalkConnectDialog(
                 if (!consented) {
                     Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
                     Spacer(Modifier.height(16.dp))
-                    Text("공식 에너지톡·카카오 화면에서 직접 로그인하고 조회할 주소를 선택해 주세요. 연결하면 선택한 주소의 청구 이력과 자가검침 상태를 이 기기에 저장해 다음 조회와 제출 확인에 사용해요.")
+                    Text("공식 에너지톡·카카오 화면에서 직접 로그인하고 조회할 주소를 선택해 주세요. 선택한 주소의 청구 이력과 자가검침 상태를 가져와요.")
                     Spacer(Modifier.height(12.dp))
                     Text(if (connectedMode) "로그인 세션은 이 기기의 암호화된 저장소에만 보관해요. 비밀번호를 읽거나 로그인 코드를 대신 교환하지 않아요. 연결 후에도 자가검침은 직접 확인하고 제출해 주세요." else "앱은 공식 페이지가 보내는 로그인 세션을 기기 메모리에서만 확인해 선택한 공급사의 사용량과 자가검침 상태를 가져와요. 비밀번호를 읽거나 로그인 코드를 대신 교환하지 않아요.")
                     Spacer(Modifier.height(12.dp))

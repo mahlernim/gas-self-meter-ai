@@ -21,11 +21,11 @@ class ProviderExpansionFlowTest {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             compose.awaitStorage(scenario)
             compose.onNodeWithText("부산").performScrollTo().performClick()
-            compose.onNodeWithText("대전").performClick()
+            compose.onNodeWithText("대전").performScrollTo().performClick()
             compose.onNodeWithText("공급사를 선택해 주세요").performScrollTo().performClick()
             compose.onNodeWithText("CNCITY에너지").performClick()
             compose.onNodeWithText("CNCITY에너지 연결하기").performScrollTo().performClick()
-            compose.onNodeWithText("에너지톡 실험적 조회").assertIsDisplayed()
+            compose.onNodeWithText("에너지톡 연결").assertIsDisplayed()
             compose.onNodeWithText("공식 에너지톡·카카오 화면에서 직접 로그인", substring = true).performScrollTo().assertIsDisplayed()
             compose.onNodeWithText("취소").performScrollTo().performClick()
             compose.onNodeWithText("CNCITY에너지 연결하기").assertIsDisplayed()

@@ -544,6 +544,7 @@ class MainActivity : ComponentActivity() {
 @Composable private fun SubmissionPage(data: AppData, target: SelfReadTarget?, now: Long, estimate: Estimate, busy: Boolean,
     refresh: () -> Unit, submit: (Double) -> Unit,
     changeSettings: (SubmissionSettings) -> Unit) {
+    val submissionDigits = if (data.gasappConnection != null || data.energyTalkConnection != null || data.profile.providerId == "samchully") 0 else 1
     val settings = data.submissionSettings
     val provider = Providers.get(data.profile.providerId)
     val demo = data.profile.meter == "demo"
@@ -584,23 +585,23 @@ class MainActivity : ComponentActivity() {
             if (demo) {
                 val month = YearMonth.from(demoDate)
                 Text("${month.atDay(20)} ~ ${month.atDay(25)}", color = Muted, style = MaterialTheme.typography.bodySmall)
-                Text(demoValue?.let { "입력 예정 ${decimalText(it)} m³" } ?: "입력할 숫자를 계산하는 중", fontSize = 28.sp, fontWeight = FontWeight.Bold)
+                Text(demoValue?.let { "입력 예정 ${decimalText(it, submissionDigits)} m³" } ?: "입력할 숫자를 계산하는 중", fontSize = 28.sp, fontWeight = FontWeight.Bold)
                 Text("최근 실측 7일 전 · 기존 제출 없음", color = Muted, style = MaterialTheme.typography.bodySmall)
-                ActionButton(demoValue?.let { "${decimalText(it)} m³ 직접 제출" } ?: "직접 제출", Icons.Outlined.CloudUpload, false) {}
+                ActionButton(demoValue?.let { "${decimalText(it, submissionDigits)} m³ 직접 제출" } ?: "직접 제출", Icons.Outlined.CloudUpload, false) {}
             } else if (!hasTarget) {
                 Text("공급사에서 검침 기간을 확인해 주세요.", color = Muted)
             } else {
                 if (periodStart != null && periodEnd != null) Text("$periodStart ~ $periodEnd", color = Muted, style = MaterialTheme.typography.bodySmall)
                 when {
-                    submitted -> Text(submittedValue?.let { "입력 완료 · ${decimalText(it)} m³" } ?: "입력 완료", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Teal)
-                    decision.value != null -> Text("입력 예정 ${decimalText(decision.value)} m³", fontSize = 28.sp, fontWeight = FontWeight.Bold)
+                    submitted -> Text(submittedValue?.let { "입력 완료 · ${decimalText(it, submissionDigits)} m³" } ?: "입력 완료", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Teal)
+                    decision.value != null -> Text("입력 예정 ${decimalText(decision.value, submissionDigits)} m³", fontSize = 28.sp, fontWeight = FontWeight.Bold)
                     else -> Text("아직 입력할 수 없어요", fontSize = 23.sp, fontWeight = FontWeight.Bold)
                 }
             }
             if (!demo) {
                 Text(decision.reason, color = Muted, style = MaterialTheme.typography.bodySmall)
                 ActionButton("검침 기간과 제출 상태 새로 확인", Icons.Outlined.Refresh, !busy, refresh)
-                if (decision.allowed && decision.value != null) ActionButton("${decimalText(decision.value)} m³ 직접 제출", Icons.Outlined.CloudUpload, !busy) { submit(decision.value) }
+                if (decision.allowed && decision.value != null) ActionButton("${decimalText(decision.value, submissionDigits)} m³ 직접 제출", Icons.Outlined.CloudUpload, !busy) { submit(decision.value) }
             }
         }
         SettingsSection("자가검침 자동제출") {
