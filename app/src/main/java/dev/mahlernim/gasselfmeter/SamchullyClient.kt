@@ -51,8 +51,8 @@ data class SamchullySelfReadState(
 )
 
 /**
- * Experimental read-only client for the public Samchully customer-center contract.
- * Contains no write endpoint.
+ * Samchully customer-center contract. Submission is limited to the explicitly
+ * allowlisted validation and self-reading endpoints, each sent as one-shot.
  */
 class SamchullyReadClient internal constructor(
     private val provider: Provider,
@@ -127,15 +127,57 @@ class SamchullyReadClient internal constructor(
         parseSelfReadState(period, target, recent)
     }
 
+    fun validateAndSubmit(contract: SamchullyContract, targetId: String, value: Double) = atStage("submit") {
+        requireCustomerNo(contract.customerNo)
+        require(targetId.length in 1..100 && targetId.none(Char::isISOControl)) { "삼천리 검침 대상 정보를 확인해 주세요." }
+        require(value.isFinite() && value in 0.0..99_999_999.0) { "제출할 검침값을 확인해 주세요." }
+        val reading = value.toString()
+        val base = JSONObject().apply {
+            put("I_VKONT", contract.customerNo)
+            put("I_TIDNR", targetId)
+            put("I_ROLGB", "MI")
+        }
+        writePost("scl/services/validation-tidnr", JSONObject(base.toString()).put("I_GUBUN", "1"))
+        writePost("scl/services/validation-tidnr", JSONObject(base.toString()).apply {
+            put("I_GUBUN", "2")
+            put("I_ZWSTAND", reading)
+        })
+        val submitted = writePost("scl/services/self-meter-img", JSONObject().apply {
+            put("I_VKONT", contract.customerNo)
+            put("I_TIDNR", targetId)
+            put("I_ZWSTAND", reading)
+            put("I_ZWSTAND_IMG", reading)
+            put("I_TMP_METER_YN", "N")
+        })
+        check(submitted.optString("E_RETCD") == "S") {
+            submitted.optString("E_RETMG").takeIf(String::isNotBlank) ?: "삼천리 검침값을 접수하지 못했어요. 잠시 후 다시 확인해 주세요."
+        }
+    }
+
     private fun post(path: String, data: JSONObject, token: String? = null): JSONObject {
         require(path in READ_ENDPOINTS) { "허용되지 않은 삼천리 조회 요청이에요." }
+        return execute(path, data, token, false).also(::checkPortalResult)
+    }
+
+    private fun writePost(path: String, data: JSONObject): JSONObject {
+        require(path in WRITE_ENDPOINTS) { "허용되지 않은 삼천리 검침 요청이에요." }
+        return execute(path, data, null, true).also(::checkPortalResult)
+    }
+
+    private fun checkPortalResult(json: JSONObject) {
+        check(json.optString("E_RETCD") != "E") {
+            json.optString("E_RETMG").takeIf(String::isNotBlank) ?: "삼천리 요청이 처리되지 않았어요. 내용을 확인해 주세요."
+        }
+    }
+
+    private fun execute(path: String, data: JSONObject, token: String?, oneShot: Boolean): JSONObject {
         val request = Request.Builder().url(API_BASE.toHttpUrl().newBuilder().addPathSegments(path).build())
             .header("Accept", "application/json, text/plain, */*")
             .header("Accept-Language", "ko-KR,ko;q=0.9")
             .header("Origin", "https://cs.samchully.co.kr")
             .header("Referer", "https://cs.samchully.co.kr/")
             .apply { if (!token.isNullOrBlank()) header("X-User-Token", token) }
-            .post(data.toString().toRequestBody(JSON_MEDIA_TYPE))
+            .post(data.toString().toRequestBody(JSON_MEDIA_TYPE).let { if (oneShot) it.oneShot() else it })
             .build()
         return client.newCall(request).execute().use { response ->
             val stage = when (path) {
@@ -143,6 +185,7 @@ class SamchullyReadClient internal constructor(
                 "scl/users/me" -> "user"
                 "scl/services/custinfo" -> "contracts"
                 "scl/services/goji-list" -> "bills"
+                in WRITE_ENDPOINTS -> "submit"
                 else -> "meter"
             }
             if (!response.isSuccessful) throw ProviderFailure(stage,
@@ -186,6 +229,10 @@ class SamchullyReadClient internal constructor(
             "scl/services/meter-check",
             "scl/services/self-meter",
             "scl/services/self-meter-list",
+        )
+        private val WRITE_ENDPOINTS = setOf(
+            "scl/services/validation-tidnr",
+            "scl/services/self-meter-img",
         )
 
         fun parseUser(response: JSONObject): SamchullyUser {

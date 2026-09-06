@@ -10,7 +10,7 @@ object ProviderRefresh {
     private const val WORK = "provider-daily-refresh"
     fun schedule(context: Context, data: AppData) {
         val manager = WorkManager.getInstance(context)
-        if (!data.ready || (data.gasappConnection == null && (data.credentials == null || !Providers.get(data.profile.providerId).passwordConnection))) {
+        if (!data.ready || (data.energyTalkConnection == null && data.gasappConnection == null && (data.credentials == null || !Providers.get(data.profile.providerId).passwordConnection))) {
             manager.cancelUniqueWork(WORK)
             return
         }
@@ -22,11 +22,12 @@ object ProviderRefresh {
     fun refresh(context: Context, force: Boolean = false): AppData = SubmissionGate.lock.withLock {
         val store = SecureStore(context)
         val data = store.read()
+        if (data.energyTalkConnection != null) return@withLock EnergyTalkBridge.refresh(context, force)
         if (data.gasappConnection != null) return@withLock GasappBridge.refresh(context, force).also { updated ->
             if (updated.cachedGasappTarget?.submitted == true) context.getSystemService(android.app.NotificationManager::class.java).cancel(3)
         }
         val credentials = data.credentials ?: return@withLock data
-        if (data.ready && Providers.get(data.profile.providerId).experimentalReadOnly) {
+        if (data.ready && Providers.get(data.profile.providerId).samchully) {
             if (!force && data.profile.syncTime?.let { System.currentTimeMillis() - it < 86_400_000L } == true) return@withLock data
             val login = SamchullyBridge.login(credentials)
             val contract = login.contracts.singleOrNull { it.key == data.profile.contract }
@@ -71,5 +72,4 @@ class ProviderRefreshWorker(context: Context, params: WorkerParameters) : Worker
         Result.retry()
     }
 }
-
 

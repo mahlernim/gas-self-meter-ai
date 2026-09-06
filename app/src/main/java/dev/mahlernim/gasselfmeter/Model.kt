@@ -67,6 +67,8 @@ data class AppData(
     val gasappBills: List<GasappBill> = emptyList(),
     val gasappMeterChangeObservedAt: Long? = null,
     val samchullyBills: List<SamchullyBill> = emptyList(),
+    val energyTalkConnection: EnergyTalkConnection? = null,
+    val energyTalkBills: List<EnergyTalkBill> = emptyList(),
 )
 data class Estimate(val reading: Double?, val daily: Double?, val source: String, val ageDays: Long?, val anchorTime: Long?)
 data class SubmissionDecision(val allowed: Boolean, val value: Double?, val reason: String)
@@ -106,7 +108,7 @@ object SubmissionPolicy {
         if (automatic && settings.requireRecentCheck && age > settings.recentDays) {
             return SubmissionDecision(false, null, "마지막 실측 확인이 ${age}일 전이에요. ${settings.recentDays}일 이내에 다시 확인해 주세요.")
         }
-        val estimated = Estimator.estimate(data, time).reading
+        val estimated = (if (!automatic && dateOf(latest.time) == date) latest.reading else Estimator.estimate(data, time).reading)
             ?: return SubmissionDecision(false, null, "제출할 현재 누적 지침을 계산할 수 없어요.")
         val value = kotlin.math.round(estimated * 10.0) / 10.0
         if (value < target.previousValue) return SubmissionDecision(false, value, "계산한 값이 공급사의 이전 검침값보다 작아 입력하지 않아요.")

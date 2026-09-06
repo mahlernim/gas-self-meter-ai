@@ -7,6 +7,7 @@ import okhttp3.Response
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
 import org.json.JSONObject
 import java.net.URI
 import java.util.concurrent.TimeUnit
@@ -17,7 +18,14 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 data class EnergyTalkUsage(val month: String, val amount: String, val usage: String)
-data class EnergyTalkMeter(val eligible: Boolean, val previous: String?, val recent: String?, val message: String?)
+data class EnergyTalkMeter(
+    val eligible: Boolean,
+    val previous: String?,
+    val recent: String?,
+    val message: String?,
+    val submitted: Boolean? = null,
+)
+data class EnergyTalkSubmissionCheck(val allowed: Boolean, val message: String?)
 /** Reference-only display. These rows are not raw-volume usage segments or measured anchors. */
 data class EnergyTalkSnapshot(
     val clientId: String, val address: String, val usage: List<EnergyTalkUsage>,
@@ -64,6 +72,47 @@ class EnergyTalkReadClient internal constructor(baseClient: OkHttpClient = OkHtt
         return EnergyTalkSnapshot(expectedClientId, address, rows, meter, unavailable)
     }
 
+    /** Provider preflight only. A false answer is final for this attempt. */
+    suspend fun checkReading(token: String, expectedClientId: String, value: Double): EnergyTalkSubmissionCheck {
+        require(value.isFinite() && value in 0.0..99_999_999.0)
+        verifyTenant(token, expectedClientId)
+        val body = JSONObject().put("guideline", java.math.BigDecimal.valueOf(value).stripTrailingZeros().toPlainString())
+        val response = postProxy("/gas/api/self-meter/check", token, body)
+        val allowed = response.optString("addableYn")
+        require(allowed == "Y" || allowed == "N") { "검침값 입력 가능 상태를 확인하지 못했어요." }
+        return EnergyTalkSubmissionCheck(allowed == "Y", text(response, "notificationMsg", 500))
+    }
+
+    /** Sends one form-data request only. The caller must reread status before reporting completion. */
+    suspend fun submitReading(token: String, expectedClientId: String, value: Double): JSONObject {
+        require(value.isFinite() && value in 0.0..99_999_999.0)
+        verifyTenant(token, expectedClientId)
+        val request = Request.Builder().url("https://energytalk.ai/api/formdata")
+            .header("Authorization", "Bearer $token").header("Origin", "https://energytalk.ai")
+            .header("Referer", "https://energytalk.ai/gas").header("Accept", "application/json")
+            .post(MultipartBody.Builder().setType(MultipartBody.FORM)
+                .addFormDataPart("method", "POST").addFormDataPart("url", "/gas/api/self-meter")
+                .addFormDataPart("guideline", java.math.BigDecimal.valueOf(value).stripTrailingZeros().toPlainString()).build().oneShot())
+            .build()
+        return execute(request)
+    }
+
+    private suspend fun verifyTenant(token: String, expectedClientId: String) {
+        require(expectedClientId in EnergyTalkBoundary.tenants)
+        require(EnergyTalkBoundary.token("Bearer $token") == token)
+        check(get("/gas/api/user/info", token).optString("clientId") == expectedClientId) { "선택한 공급사와 로그인한 공급사가 달라요." }
+    }
+
+    private suspend fun postProxy(path: String, token: String, body: JSONObject): JSONObject {
+        require(path == "/gas/api/self-meter/check")
+        val payload = JSONObject().put("method", "POST").put("url", path).put("body", body)
+        val request = Request.Builder().url("https://energytalk.ai/api/fetch")
+            .header("Authorization", "Bearer $token").header("Origin", "https://energytalk.ai")
+            .header("Referer", "https://energytalk.ai/gas").header("Accept", "application/json")
+            .post(payload.toString().toRequestBody("application/json".toMediaType()).oneShot()).build()
+        return execute(request)
+    }
+
     private suspend fun get(path: String, token: String): JSONObject {
         check(path in setOf("/gas/api/user/info", "/gas/api/pay/usage", "/gas/api/self-meter"))
         val payload = JSONObject().put("method", "GET").put("url", path).put("body", JSONObject())
@@ -71,7 +120,10 @@ class EnergyTalkReadClient internal constructor(baseClient: OkHttpClient = OkHtt
             .header("Authorization", "Bearer $token").header("Origin", "https://energytalk.ai")
             .header("Referer", "https://energytalk.ai/gas").header("Accept", "application/json")
             .post(payload.toString().toRequestBody("application/json".toMediaType())).build()
-        return suspendCancellableCoroutine { continuation ->
+        return execute(request)
+    }
+
+    private suspend fun execute(request: Request): JSONObject = suspendCancellableCoroutine { continuation ->
             val call = client.newCall(request)
             continuation.invokeOnCancellation { call.cancel() }
             call.enqueue(object : Callback {
@@ -89,7 +141,6 @@ class EnergyTalkReadClient internal constructor(baseClient: OkHttpClient = OkHtt
                 }
             })
         }
-    }
 
     private fun parseResponse(response: Response): JSONObject {
         if (response.code == 401 || response.code == 403) throw EnergyTalkAuthException()
@@ -131,7 +182,14 @@ class EnergyTalkReadClient internal constructor(baseClient: OkHttpClient = OkHtt
             fun reading(key: String): String? = text(json, key)?.takeIf { it.isNotBlank() }?.also {
                 require(it.matches(Regex("[0-9]+(?:\\.[0-9]+)?")) && it.toDoubleOrNull()?.isFinite() == true)
             }
-            return EnergyTalkMeter(state == "Y", reading("prevGuideline"), reading("recentGuideLine"), text(json, "checkMsg", 500))
+            val submitted = listOf("submittedYn", "selfReadYn", "inputYn").firstNotNullOfOrNull { key ->
+                text(json, key)?.let { value ->
+                    require(value == "Y" || value == "N") { "제출 상태 형식을 확인하지 못했어요." }
+                    value == "Y"
+                }
+            }
+            return EnergyTalkMeter(state == "Y", reading("prevGuideline"), reading("recentGuideLine"),
+                text(json, "checkMsg", 500), submitted)
         }
     }
 }

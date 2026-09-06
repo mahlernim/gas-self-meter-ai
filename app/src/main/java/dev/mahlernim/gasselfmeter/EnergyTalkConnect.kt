@@ -61,8 +61,14 @@ internal open class EnergyTalkWebClient(
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun EnergyTalkConnectDialog(clientId: String, onDismiss: () -> Unit, onResult: (EnergyTalkSnapshot) -> Unit) {
+fun EnergyTalkConnectDialog(
+    clientId: String,
+    onDismiss: () -> Unit,
+    onResult: (EnergyTalkSnapshot) -> Unit,
+    onConnected: ((EnergyTalkConnection, EnergyTalkSnapshot) -> Unit)? = null,
+) {
     require(clientId in EnergyTalkBoundary.tenants)
+    val connectedMode = onConnected != null
     var consented by remember(clientId) { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var requestJob by remember { mutableStateOf<Job?>(null) }
@@ -74,6 +80,7 @@ fun EnergyTalkConnectDialog(clientId: String, onDismiss: () -> Unit, onResult: (
     val scope = rememberCoroutineScope()
     var browser by remember { mutableStateOf<WebView?>(null) }
     val latestResult by rememberUpdatedState(onResult)
+    val latestConnected by rememberUpdatedState(onConnected)
     DisposableEffect(clientId) {
         onDispose {
             synchronized(candidate) { sessionClosed.set(true); candidate.set(null) }
@@ -98,13 +105,13 @@ fun EnergyTalkConnectDialog(clientId: String, onDismiss: () -> Unit, onResult: (
     Dialog(onDismissRequest = ::close, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             Column(Modifier.fillMaxSize().safeDrawingPadding().padding(12.dp)) {
-                Text("에너지톡 실험적 조회", style = MaterialTheme.typography.titleLarge)
+                Text(if (connectedMode) "에너지톡 연결" else "에너지톡 조회", style = MaterialTheme.typography.titleLarge)
                 if (!consented) {
                     Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
                     Spacer(Modifier.height(16.dp))
-                    Text("공식 에너지톡·카카오 화면에서 직접 로그인하고 조회할 주소를 선택해 주세요. 공식 서비스의 가입·약관 동의가 발생할 수 있어요. 이 웹 화면은 조회 전용이 아니므로 결제나 검침 제출 버튼을 누르지 마세요.")
+                    Text("공식 에너지톡·카카오 화면에서 직접 로그인하고 조회할 주소를 선택해 주세요. 연결하면 선택한 주소의 청구 이력과 자가검침 상태를 이 기기에 저장해 다음 조회와 제출 확인에 사용해요.")
                     Spacer(Modifier.height(12.dp))
-                    Text("앱은 공식 페이지가 보내는 로그인 세션을 기기 메모리에서만 확인하고, 선택한 공급사의 사용량·자가검침 상태를 가져와요. 비밀번호를 읽거나 로그인 코드를 대신 교환하지 않아요. 결과는 참고용이며 추정 모델이나 자동 제출에 사용하지 않아요.")
+                    Text(if (connectedMode) "로그인 세션은 이 기기의 암호화된 저장소에만 보관해요. 비밀번호를 읽거나 로그인 코드를 대신 교환하지 않아요. 연결 후에도 자가검침은 직접 확인하고 제출해 주세요." else "앱은 공식 페이지가 보내는 로그인 세션을 기기 메모리에서만 확인해 선택한 공급사의 사용량과 자가검침 상태를 가져와요. 비밀번호를 읽거나 로그인 코드를 대신 교환하지 않아요.")
                     Spacer(Modifier.height(12.dp))
                     Text("정상적으로 닫을 때 에너지톡 웹 저장소와 일부 쿠키 삭제를 시도해요. 비정상 종료나 쿠키 경로에 따라 로그인 정보가 남을 수 있어요. 카카오 로그인 쿠키는 지우지 않아요.")
                     Button(onClick = { consented = true }) { Text("동의하고 공식 로그인 열기") }
@@ -151,6 +158,7 @@ fun EnergyTalkConnectDialog(clientId: String, onDismiss: () -> Unit, onResult: (
                                         val snapshot = withContext(Dispatchers.IO) { EnergyTalkReadClient().verifyAndRead(token, clientId) }
                                         candidate.set(null)
                                         latestResult(snapshot)
+                                        latestConnected?.invoke(EnergyTalkConnection(clientId, token), snapshot)
                                     } catch (e: CancellationException) {
                                         throw e
                                     } catch (_: EnergyTalkAuthException) {

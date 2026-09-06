@@ -6,6 +6,27 @@ import java.time.LocalDate
 import java.time.YearMonth
 
 class GasappIntegrationTest {
+    @Test fun sameDayActualReadingIsManualFallbackButNeverAutomaticFallback() {
+        val time = dayStart(LocalDate.of(2026, 9, 7)) + 12 * 3_600_000L
+        val actual = data().copy(observations = listOf(Observation(time - 4 * 3_600_000L, 113.8, meter)))
+        val manual = GasappSubmissionPolicy.decide(actual, target, time, automatic = false)
+        assertTrue(manual.reason, manual.allowed)
+        assertEquals(113.0, manual.value!!, .0001)
+        assertFalse(GasappSubmissionPolicy.decide(actual.copy(submissionSettings = SubmissionSettings(automatic = true)), target, time, automatic = true).allowed)
+
+        val nextDay = GasappSubmissionPolicy.decide(actual, target, time + 86_400_000L, automatic = false)
+        assertFalse(nextDay.allowed)
+    }
+
+    @Test fun sameDayActualReadingIsPreferredOverAnAvailableEstimate() {
+        val time = dayStart(LocalDate.of(2026, 9, 7)) + 12 * 3_600_000L
+        val actual = data().copy(observations = listOf(Observation(time, 113.8, meter)))
+        val manual = GasappSubmissionPolicy.decide(actual, target, time, automatic = false)
+        assertTrue(manual.allowed)
+        assertEquals("오늘 확인한 계량기 숫자로 제출값을 정했어요.", manual.reason)
+        assertEquals(113.0, manual.value!!, .0001)
+    }
+
     @Test fun rejectedAttemptCannotBeAutomaticallyRetried() {
         val time = dayStart(LocalDate.of(2026, 9, 7))
         val calibrated = data().copy(submissionSettings = SubmissionSettings(automatic = true),
@@ -46,6 +67,13 @@ class GasappIntegrationTest {
         val summary = HistorySummary.months(merged, YearMonth.of(2026, 9)).last()
         assertEquals(12.0, summary.usage!!, .0001)
         assertEquals(14000.0, summary.billedAmount!!, .0001)
+    }
+
+    @Test fun gasappConnectionClearsPriorEnergyTalkBillingState() {
+        val withEnergyTalk = data().copy(energyTalkBills = listOf(EnergyTalkBill("202608", "12", "14000", "m³")))
+        val merged = GasappBridge.merge(withEnergyTalk, connection, GasappSnapshot(account, emptyList(), emptyList(), target))
+        assertNull(merged.energyTalkConnection)
+        assertTrue(merged.energyTalkBills.isEmpty())
     }
 
     @Test fun importedReadingsDoNotQualifyAsPhysicalCalibrationForAutomaticSubmission() {

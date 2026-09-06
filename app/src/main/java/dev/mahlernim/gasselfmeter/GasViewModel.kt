@@ -56,6 +56,8 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
             observations = if (next.observations == before.observations) latest.observations else next.observations,
             credentials = if (next.credentials == before.credentials) latest.credentials else next.credentials,
             gasappConnection = if (next.gasappConnection == before.gasappConnection) latest.gasappConnection else next.gasappConnection,
+            energyTalkConnection = if (next.energyTalkConnection == before.energyTalkConnection) latest.energyTalkConnection else next.energyTalkConnection,
+            energyTalkBills = if (next.energyTalkBills == before.energyTalkBills) latest.energyTalkBills else next.energyTalkBills,
             submissionSettings = if (next.submissionSettings == before.submissionSettings) latest.submissionSettings else next.submissionSettings,
             profile = next.profile.copy(
                 meter = if (next.profile.meter == before.profile.meter) latest.profile.meter else next.profile.meter,
@@ -90,7 +92,19 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
     fun manual(provider: String) = attempt {
-        save(data.copy(profile = data.profile.copy(providerId = provider), ready = true))
+        val changed = provider != data.profile.providerId
+        save(data.copy(profile = data.profile.copy(providerId = provider,
+            contract = if (changed) "" else data.profile.contract,
+            customerNumber = if (changed) "" else data.profile.customerNumber,
+            meter = if (changed) "manual-${UUID.randomUUID()}" else data.profile.meter,
+            plannedDate = if (changed) null else data.profile.plannedDate, syncTime = null),
+            ready = true, credentials = null, gasappConnection = null, energyTalkConnection = null,
+            cachedSelfRead = null, cachedGasappTarget = null, gasappMeterChangeObservedAt = null,
+            gasappBills = if (changed) emptyList() else data.gasappBills,
+            samchullyBills = if (changed) emptyList() else data.samchullyBills,
+            energyTalkBills = if (changed) emptyList() else data.energyTalkBills,
+            submissions = if (changed) emptyList() else data.submissions, submissionSettings = SubmissionSettings()))
+        scheduleStoredData()
     }
     fun calibrate(reading: String, onResult: (String?) -> Unit = {}) = attempt(onResult) {
         save(Estimator.addObservation(data, number(reading)))
@@ -111,12 +125,12 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
         message = "새 계량기로 시작해요. 현재 숫자를 확인해 주세요."
     }
     fun changeProvider() = attempt {
-        save(data.copy(ready = false, credentials = null, submissionSettings = SubmissionSettings(), cachedSelfRead = null, gasappConnection = null, cachedGasappTarget = null))
+        save(data.copy(ready = false, credentials = null, submissionSettings = SubmissionSettings(), cachedSelfRead = null, gasappConnection = null, cachedGasappTarget = null, energyTalkConnection = null))
         scheduleSubmission()
         scheduleRefresh()
     }
     fun forgetCredentials() = attempt {
-        save(data.copy(credentials = null, gasappConnection = null, submissionSettings = data.submissionSettings.copy(automatic = false)))
+        save(data.copy(credentials = null, gasappConnection = null, energyTalkConnection = null, submissionSettings = data.submissionSettings.copy(automatic = false)))
         scheduleSubmission()
         scheduleRefresh()
         message = "저장한 로그인 정보를 지웠고 자동 입력을 껐어요."
@@ -139,7 +153,7 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
     fun login(providerId: String, username: String, password: String, rememberPassword: Boolean) {
         if (busy) return
         if (username.isBlank() || password.isBlank()) { loginError = "아이디와 비밀번호를 입력해 주세요."; message = loginError; return }
-        if (Providers.get(providerId).experimentalReadOnly) {
+        if (Providers.get(providerId).samchully) {
             loginSamchully(username, password, rememberPassword)
             return
         }
@@ -195,7 +209,7 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
         val periods = (keep + result.periods).sortedBy { it.start }
         Estimator.validatePeriods(periods)
         save(data.copy(profile = data.profile.copy(providerId = provider.id, meter = result.meter, contract = contractKey, customerNumber = contract.ca, plannedDate = result.planned, syncTime = System.currentTimeMillis()),
-            periods = periods, credentials = if (remember) pendingCredentials else null, ready = true, cachedSelfRead = result.selfRead, gasappConnection = null, cachedGasappTarget = null))
+            periods = periods, credentials = if (remember) pendingCredentials else null, ready = true, cachedSelfRead = result.selfRead, gasappConnection = null, cachedGasappTarget = null, energyTalkConnection = null, energyTalkBills = emptyList(), samchullyBills = emptyList(), gasappBills = emptyList()))
         selfReadTarget = result.selfRead
         scheduleSubmission()
         scheduleRefresh()
@@ -205,6 +219,9 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
     }
     fun connectGasapp(session: GasappSession, account: GasappAccount) = gasappAction("청구 이력과 검침 정보를 가져오는 중") {
         GasappBridge.connect(getApplication(), session, account)
+    }
+    fun connectEnergyTalk(connection: EnergyTalkConnection, snapshot: EnergyTalkSnapshot) = gasappAction("청구 이력과 검침 정보를 저장하는 중") {
+        EnergyTalkBridge.connect(getApplication(), connection, snapshot)
     }
     private fun gasappAction(label: String, action: () -> AppData) {
         if (busy) return
@@ -224,7 +241,8 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
     }
     fun checkSubmissionStatus() {
         if (busy) return
-        if (Providers.get(data.profile.providerId).experimentalReadOnly) { message = "삼천리는 실험적 조회 전용이에요. 검침 제출은 공급사 홈페이지를 이용해 주세요."; return }
+        if (data.energyTalkConnection != null) { gasappAction("검침 기간과 제출 상태를 확인하는 중") { EnergyTalkBridge.checkStatus(getApplication()) }; return }
+        if (Providers.get(data.profile.providerId).samchully) { gasappAction("검침 기간과 제출 상태를 확인하는 중") { SamchullyBridge.checkStatus(getApplication()) }; return }
         if (data.gasappConnection != null) { gasappAction("검침 기간과 제출 상태를 확인하는 중") { GasappBridge.checkStatus(getApplication()) }; return }
         val credentials = data.credentials ?: run { message = "자동 입력을 사용하려면 설정에서 로그인 정보를 암호화해 저장해 주세요."; return }
         busy = true; setProgress(0, 3, "검침 기간을 확인하려고 로그인하는 중")
@@ -247,7 +265,8 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
     }
     fun submitReading(value: Double) {
         if (busy) return
-        if (Providers.get(data.profile.providerId).experimentalReadOnly) { message = "삼천리는 조회 전용이며 검침값을 전송하지 않아요."; return }
+        if (data.energyTalkConnection != null) { gasappAction("검침값을 제출하고 결과를 확인하는 중") { EnergyTalkBridge.submit(getApplication(), value) }; return }
+        if (Providers.get(data.profile.providerId).samchully) { gasappAction("검침값을 제출하고 결과를 확인하는 중") { SamchullyBridge.submit(getApplication(), value) }; return }
         if (data.gasappConnection != null) {
             gasappAction("제출 직전 공급사 상태를 다시 확인하는 중") { GasappBridge.submit(getApplication(), value, automatic = false) }
             return
@@ -334,13 +353,13 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun scheduleSubmission(snapshot: AppData = data) = withContext(Dispatchers.IO) { SubmissionScheduler.schedule(getApplication(), snapshot) }
     private suspend fun scheduleRefresh(snapshot: AppData = data) = withContext(Dispatchers.IO) { ProviderRefresh.schedule(getApplication(), snapshot) }
     private fun refreshIfDue() {
-        if ((data.credentials != null || data.gasappConnection != null) &&
+        if ((data.credentials != null || data.gasappConnection != null || data.energyTalkConnection != null) &&
             (data.profile.syncTime == null || System.currentTimeMillis() - data.profile.syncTime!! >= 86_400_000L)) refresh(false)
     }
     fun refresh() = refresh(true)
     private fun refresh(force: Boolean) {
         if (busy) return
-        if (data.credentials == null && data.gasappConnection == null) { message = "로그인 정보를 저장하지 않았어요. 설정에서 다시 연결해 주세요."; return }
+        if (data.credentials == null && data.gasappConnection == null && data.energyTalkConnection == null) { message = "로그인 정보를 저장하지 않았어요. 설정에서 다시 연결해 주세요."; return }
         busy = true; setProgress(0, 1, "공급사 정보를 갱신하는 중")
         viewModelScope.launch {
             try {

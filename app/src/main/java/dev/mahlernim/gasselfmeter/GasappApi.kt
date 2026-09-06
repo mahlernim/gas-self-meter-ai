@@ -29,7 +29,7 @@ class GasappIdentity(val name: String, val phone: String, val birthday: String, 
         require(name.trim().length in 2..80) { "이름을 확인해 주세요." }
         require(phone.matches(Regex("01[016789][0-9]{7,8}"))) { "휴대전화 번호를 확인해 주세요." }
         require(gender in listOf("1", "2", "3", "4")) { "주민등록번호 뒤 첫 자리 1~4를 입력해 주세요." }
-        require(carrier in listOf("1", "2", "3")) { "통신사를 선택해 주세요." }
+        require(carrier in listOf("1", "2", "3", "5", "6", "7")) { "통신사를 선택해 주세요." }
         require(birthday.matches(Regex("[0-9]{6}"))) { "생년월일 여섯 자리를 입력해 주세요." }
         require(runCatching { LocalDate.parse(birthDate, DateTimeFormatter.BASIC_ISO_DATE) <= LocalDate.now() }.getOrDefault(false)) { "생년월일을 확인해 주세요." }
     }
@@ -77,7 +77,7 @@ class GasappApi internal constructor(
     )
 
     fun terms(carrier: String): List<GasappTerms> {
-        val carrierName = mapOf("1" to "SKT", "2" to "KT", "3" to "LGU")[carrier] ?: error("통신사를 선택해 주세요.")
+        val carrierName = carriers[carrier] ?: error("통신사를 선택해 주세요.")
         return listOf("본인인증 약관 $carrierName", "최초 회원 가입 약관", "최초 회원 가입 약관-도시가스 사 정보 조회").map { category ->
             val payload = request("GET", "documents/search/0", params = mapOf("category" to category))
             val documents = objects(payload, "documents")
@@ -91,7 +91,7 @@ class GasappApi internal constructor(
 
     fun requestSms(identity: GasappIdentity, acceptedTerms: List<GasappTerms>): GasappSms {
         require(acceptedTerms.size == 3 && acceptedTerms.all { it.text.isNotBlank() }) { "필수 약관을 확인하고 동의해 주세요." }
-        val expectedCarrier = mapOf("1" to "SKT", "2" to "KT", "3" to "LGU").getValue(identity.carrier)
+        val expectedCarrier = carriers.getValue(identity.carrier)
         require(acceptedTerms.first().category == "본인인증 약관 $expectedCarrier") { "변경한 통신사의 약관을 다시 확인해 주세요." }
         val result = obj(request("POST", "extern/auth/nice/sms/request", body = JSONObject()
             .put("mobileCo", identity.carrier).put("mobileNo", identity.phone).put("birthday", identity.birthday)
@@ -218,6 +218,14 @@ class GasappApi internal constructor(
     override fun close() { http.dispatcher.cancelAll(); http.connectionPool.evictAll(); http.dispatcher.executorService.shutdown() }
 
     companion object {
+        internal val carriers = mapOf(
+            "1" to "SKT",
+            "2" to "KT",
+            "3" to "LGU",
+            "5" to "SKT 알뜰폰",
+            "6" to "KT 알뜰폰",
+            "7" to "LGU 알뜰폰",
+        )
         val companyProviders = mapOf("1" to "seoul", "2" to "incheon", "3" to "jeju", "4" to "jb", "5" to "daeryun",
             "6" to "yesco", "7" to "gunsan", "8" to "kiturami", "9" to "chambit", "10" to "chambit",
             "11" to "chambit", "12" to "chambit", "13" to "chambit", "14" to "kyungdong", "15" to "mcenergy",
