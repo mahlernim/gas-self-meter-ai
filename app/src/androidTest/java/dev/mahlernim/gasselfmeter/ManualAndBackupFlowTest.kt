@@ -38,7 +38,7 @@ class ManualAndBackupFlowTest {
             compose.waitUntil(5000) { SecureStore(context).read().profile.reminder }
             compose.awaitStorage(scenario)
             val workManager = androidx.work.WorkManager.getInstance(context)
-            val scheduled = workManager.getWorkInfosForUniqueWork("calibration-daily-check").get(5, java.util.concurrent.TimeUnit.SECONDS)
+            val scheduled = workManager.getWorkInfosForUniqueWork("calibration-check").get(5, java.util.concurrent.TimeUnit.SECONDS)
             assertTrue(scheduled.any { it.state == androidx.work.WorkInfo.State.ENQUEUED })
             // A fresh calibration suppresses the weekly reminder and its follow-ups.
             val reminderWork = androidx.work.OneTimeWorkRequestBuilder<ReminderWorker>().build()

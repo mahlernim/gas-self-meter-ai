@@ -32,10 +32,26 @@ private inline fun <reified T : ListenableWorker> daily(context: Context, name: 
 
 object Reminders {
     const val CHANNEL = "weekly-meter-check"
+    private const val WORK = "calibration-check"
+
     fun schedule(context: Context, profile: Profile) {
-        WorkManager.getInstance(context).cancelUniqueWork("weekly-meter-check")
-        daily<ReminderWorker>(context, "calibration-daily-check", profile.reminder, profile.reminderHour)
+        val manager = WorkManager.getInstance(context)
+        // Retire the earlier schedules. The periodic one could run before the chosen hour, where
+        // the policy declines, and then wait a whole day for its next window.
+        manager.cancelUniqueWork("weekly-meter-check")
+        manager.cancelUniqueWork("calibration-daily-check")
+        enqueueNext(context, profile, System.currentTimeMillis())
         context.getSystemService(NotificationManager::class.java).cancel(1)
+    }
+
+    /** Aim the next run at the chosen hour. The worker calls this again once it has run. */
+    internal fun enqueueNext(context: Context, profile: Profile, time: Long) {
+        val manager = WorkManager.getInstance(context)
+        if (!profile.reminder) { manager.cancelUniqueWork(WORK); return }
+        val delay = (ReminderPolicy.nextCalibrationRun(profile, time) - time).coerceAtLeast(0)
+        val request = OneTimeWorkRequestBuilder<ReminderWorker>()
+            .setInitialDelay(delay, TimeUnit.MILLISECONDS).build()
+        manager.enqueueUniqueWork(WORK, ExistingWorkPolicy.REPLACE, request)
     }
 }
 
@@ -206,9 +222,17 @@ class SubmissionReminderWorker(context: Context, params: WorkerParameters) : Wor
 
 class ReminderWorker(context: Context, params: WorkerParameters) : Worker(context, params) {
     override fun doWork(): Result {
-        val data = try { SecureStore(applicationContext).read() } catch (_: Exception) { return Result.failure() }
-        if (ReminderPolicy.calibrationDue(data, System.currentTimeMillis())) notify(applicationContext, 1, Reminders.CHANNEL,
+        // A one-shot chain ends if this run is dropped, so a failed read is retried a few times
+        // before giving up. Opening the app schedules the chain again either way.
+        val data = try { SecureStore(applicationContext).read() } catch (_: Exception) {
+            return if (runAttemptCount < 3) Result.retry() else Result.failure()
+        }
+        val now = System.currentTimeMillis()
+        if (ReminderPolicy.calibrationDue(data, now)) notify(applicationContext, 1, Reminders.CHANNEL,
             "보정 알림", "똑똑, 계량기를 확인할 시간이에요", "계량기를 보고 보정해 주세요. 실제 숫자를 입력하면 추정이 더 정확해져요.")
+        // Keep the chain alive even when nothing was due, so a run that landed early or late moves
+        // on to the next occurrence instead of ending the schedule.
+        Reminders.enqueueNext(applicationContext, data.profile, now)
         return Result.success()
     }
 }
