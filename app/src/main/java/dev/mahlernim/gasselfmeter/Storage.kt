@@ -30,6 +30,7 @@ object DataCodec {
             put("syncTime", data.profile.syncTime); put("reminder", data.profile.reminder)
             put("reminderDay", data.profile.reminderDay); put("reminderHour", data.profile.reminderHour)
             put("reminderRepeatCount", data.profile.reminderRepeatCount); put("customerNumber", data.profile.customerNumber)
+            if (includeCredentials) put("reconnectRequired", data.profile.reconnectRequired)
         })
         put("periods", JSONArray().apply { data.periods.forEach { p -> put(JSONObject().apply {
             put("start", p.start); put("end", p.end); put("usage", p.usage); put("meter", p.meter)
@@ -77,7 +78,9 @@ object DataCodec {
             if (p.isNull("syncTime")) null else p.getLong("syncTime"),
             if (allowCredentials) p.optBoolean("reminder") else false,
             p.optInt("reminderDay", 7).also { require(it in 1..7) }, p.optInt("reminderHour", 19).also { require(it in 0..23) },
-            p.optInt("reminderRepeatCount", 3).also { require(it in 0..6) }, p.optString("customerNumber").take(100))
+            p.optInt("reminderRepeatCount", 3).also { require(it in 0..6) }, p.optString("customerNumber").take(100),
+            // An imported backup carries no credentials, so it never starts out needing a reconnect.
+            allowCredentials && p.optBoolean("reconnectRequired"))
         val rows = json.getJSONArray("periods")
         require(rows.length() <= 600)
         val periods = (0 until rows.length()).map { i -> rows.getJSONObject(i).let { r ->

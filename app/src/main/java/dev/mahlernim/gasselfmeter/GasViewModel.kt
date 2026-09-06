@@ -47,10 +47,22 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
             if (!storageError) refreshIfDue()
         }
     }
-    private fun publish(next: AppData) { data = next; selfReadTarget = next.cachedSelfRead }
+    private fun publish(next: AppData) {
+        data = next; selfReadTarget = next.cachedSelfRead
+        // A hold recorded by background work has to reach the banner too, not just this session.
+        if (next.profile.reconnectRequired) reconnectRequired = true
+    }
+    /** Re-verifying a connection that stayed the same lifts the hold background work recorded. */
+    private suspend fun connectionRestored() {
+        if (data.profile.reconnectRequired) mutateStored { it.copy(profile = it.profile.copy(reconnectRequired = false)) }
+        reconnectRequired = false
+    }
     private suspend fun save(next: AppData) {
         check(!storageError) { "저장 파일을 먼저 복구하거나 초기화해 주세요." }
         val before = data
+        // Replacing or clearing the stored connection always ends the hold on the old one.
+        val reconnected = next.credentials != before.credentials ||
+            next.gasappConnection != before.gasappConnection || next.energyTalkConnection != before.energyTalkConnection
         val saved = withContext(Dispatchers.IO) { store.update { latest ->
             check(latest.profile.providerId == before.profile.providerId && latest.profile.contract == before.profile.contract) { "계정 정보가 변경되었어요. 현재 연결을 다시 확인해 주세요." }
             if (next.observations != before.observations) check(latest.profile.meter == before.profile.meter) { "계량기 정보가 변경되었어요. 현재 계량기를 다시 확인해 주세요." }
@@ -66,7 +78,9 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
                 meter = if (next.profile.meter == before.profile.meter) latest.profile.meter else next.profile.meter,
                 plannedDate = if (next.profile.plannedDate == before.profile.plannedDate) latest.profile.plannedDate else next.profile.plannedDate,
                 syncTime = if (next.profile.syncTime == before.profile.syncTime) latest.profile.syncTime else next.profile.syncTime,
-                customerNumber = if (next.profile.customerNumber == before.profile.customerNumber) latest.profile.customerNumber else next.profile.customerNumber),
+                customerNumber = if (next.profile.customerNumber == before.profile.customerNumber) latest.profile.customerNumber else next.profile.customerNumber,
+                // A hold recorded by background work between the snapshot and this write survives.
+                reconnectRequired = !reconnected && (next.profile.reconnectRequired || latest.profile.reconnectRequired)),
             periods = if (next.periods == before.periods) latest.periods else next.periods,
             submissions = if (next.submissions == before.submissions) latest.submissions else next.submissions,
             cachedSelfRead = if (next.cachedSelfRead == before.cachedSelfRead) latest.cachedSelfRead else next.cachedSelfRead,
@@ -74,6 +88,20 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
             samchullyBills = if (next.samchullyBills == before.samchullyBills) latest.samchullyBills else next.samchullyBills,
             cachedGasappTarget = if (next.cachedGasappTarget == before.cachedGasappTarget) latest.cachedGasappTarget else next.cachedGasappTarget,
             gasappMeterChangeObservedAt = if (next.gasappMeterChangeObservedAt == before.gasappMeterChangeObservedAt) latest.gasappMeterChangeObservedAt else next.gasappMeterChangeObservedAt)
+        } }
+        publish(saved)
+    }
+    /**
+     * Apply a change against the stored copy rather than a snapshot taken when the user started.
+     * A delete that resolves its target here cannot remove a row a concurrent sync moved, and it
+     * cannot overwrite that sync's other rows with a stale list.
+     */
+    private suspend fun mutateStored(transform: (AppData) -> AppData) {
+        check(!storageError) { "저장 파일을 먼저 복구하거나 초기화해 주세요." }
+        val before = data
+        val saved = withContext(Dispatchers.IO) { store.update { latest ->
+            check(latest.profile.providerId == before.profile.providerId && latest.profile.contract == before.profile.contract) { "계정 정보가 변경되었어요. 현재 연결을 다시 확인해 주세요." }
+            transform(latest)
         } }
         publish(saved)
     }
@@ -122,8 +150,18 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
         save(data.copy(periods = next.sortedBy { it.start }))
         message = "사용 이력을 저장했어요."
     }
-    fun deletePeriod(period: UsagePeriod) = attempt { save(data.copy(periods = data.periods - period)) }
-    fun deleteObservation(observation: Observation) = attempt { save(data.copy(observations = data.observations - observation)) }
+    fun deletePeriod(period: UsagePeriod, onResult: (String?) -> Unit = {}) = attempt(onResult) {
+        mutateStored { latest ->
+            check(period in latest.periods) { "이 사용 이력이 이미 변경되었어요. 목록을 다시 확인해 주세요." }
+            latest.copy(periods = latest.periods - period)
+        }
+    }
+    fun deleteObservation(observation: Observation, onResult: (String?) -> Unit = {}) = attempt(onResult) {
+        mutateStored { latest ->
+            check(observation in latest.observations) { "이 실측 기록이 이미 변경되었어요. 목록을 다시 확인해 주세요." }
+            latest.copy(observations = latest.observations - observation)
+        }
+    }
     fun resetMeter(onResult: (String?) -> Unit = {}) = attempt(onResult) {
         save(data.copy(profile = data.profile.copy(meter = "manual-${UUID.randomUUID()}", plannedDate = null)))
         message = "새 계량기로 시작해요. 현재 숫자를 확인해 주세요."
@@ -254,6 +292,7 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 data = withContext(Dispatchers.IO) { action() }
                 selfReadTarget = data.cachedSelfRead
+                connectionRestored()
                 scheduleRefresh()
                 scheduleSubmission()
                 val recent = data.submissions.lastOrNull { System.currentTimeMillis() - it.attemptedAt < 60_000 }
@@ -379,6 +418,8 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun scheduleSubmission(snapshot: AppData = data) = withContext(Dispatchers.IO) { SubmissionScheduler.schedule(getApplication(), snapshot) }
     private suspend fun scheduleRefresh(snapshot: AppData = data) = withContext(Dispatchers.IO) { ProviderRefresh.schedule(getApplication(), snapshot) }
     private fun refreshIfDue() {
+        // A held connection waits for the user to reconnect rather than retrying on every launch.
+        if (data.profile.reconnectRequired) return
         if ((data.credentials != null || data.gasappConnection != null || data.energyTalkConnection != null) &&
             (data.profile.syncTime == null || System.currentTimeMillis() - data.profile.syncTime!! >= 86_400_000L)) refresh(false)
     }
@@ -391,6 +432,7 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 data = withContext(Dispatchers.IO) { ProviderRefresh.refresh(getApplication(), force) }
                 selfReadTarget = data.cachedSelfRead
+                connectionRestored()
                 if (force) message = "공급사 정보를 갱신했어요."
             } catch (e: Exception) {
                 val detail = reportError(e, "refresh")
@@ -448,7 +490,15 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
     }
     private suspend fun reportError(e: Exception, stage: String = "sync"): String {
         val provider = pendingProvider?.id ?: data.profile.providerId
-        if (data.ready && (e is GasappAuthExpired || e is ProviderFailure && e.category == "authentication")) reconnectRequired = true
+        if (data.ready && BackgroundState.rejectedCredentials(e)) {
+            reconnectRequired = true
+            // Persist the hold so a rejection seen here also stops the periodic workers.
+            if (!storageError && !data.profile.reconnectRequired) runCatching {
+                mutateStored { it.copy(profile = it.profile.copy(reconnectRequired = true)) }
+                scheduleRefresh()
+                scheduleSubmission()
+            }
+        }
         return readableError(e) + "\n" + withContext(Dispatchers.IO) { Diagnostics.record(getApplication(), provider, stage, e) }
     }
     private fun clearPending() { pendingClient?.close(); pendingClient = null; pendingSamchully = null; pendingDirect?.close(); pendingDirect = null; pendingProvider = null; pendingCredentials = null; contracts = emptyList() }

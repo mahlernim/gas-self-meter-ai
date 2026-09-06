@@ -10,7 +10,7 @@ object ProviderRefresh {
     private const val WORK = "provider-daily-refresh"
     fun schedule(context: Context, data: AppData) {
         val manager = WorkManager.getInstance(context)
-        if (!data.ready || (data.energyTalkConnection == null && data.gasappConnection == null && (data.credentials == null || !Providers.get(data.profile.providerId).passwordConnection))) {
+        if (data.profile.reconnectRequired || !data.ready || (data.energyTalkConnection == null && data.gasappConnection == null && (data.credentials == null || !Providers.get(data.profile.providerId).passwordConnection))) {
             manager.cancelUniqueWork(WORK)
             return
         }
@@ -64,12 +64,24 @@ object ProviderRefresh {
 }
 
 class ProviderRefreshWorker(context: Context, params: WorkerParameters) : Worker(context, params) {
-    override fun doWork(): Result = try {
-        ProviderRefresh.refresh(applicationContext)
-        Result.success()
-    } catch (e: Exception) {
-        val provider = runCatching { SecureStore(applicationContext).read().profile.providerId }.getOrDefault("unknown")
-        Diagnostics.record(applicationContext, provider, "background", e)
-        Result.retry()
+    override fun doWork(): Result {
+        val store = SecureStore(applicationContext)
+        val expected = try { store.read() } catch (_: Exception) { return Result.failure() }
+        if (expected.profile.reconnectRequired) return Result.success()
+        return try {
+            ProviderRefresh.refresh(applicationContext)
+            Result.success()
+        } catch (e: Exception) {
+            Diagnostics.record(applicationContext, expected.profile.providerId, "background", e)
+            // Retrying a rejected password only replays it. Hold the connection and stop instead.
+            if (!BackgroundState.rejectedCredentials(e)) Result.retry() else {
+                runCatching {
+                    val held = store.update { BackgroundState.holdConnection(it, expected) }
+                    ProviderRefresh.schedule(applicationContext, held)
+                    SubmissionScheduler.schedule(applicationContext, held)
+                }
+                Result.failure()
+            }
+        }
     }
 }
