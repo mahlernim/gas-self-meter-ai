@@ -17,7 +17,11 @@ import javax.crypto.spec.GCMParameterSpec
 object DataCodec {
     private fun JSONObject.optionalDouble(key: String): Double? = if (isNull(key)) null else getDouble(key)
     private fun JSONObject.optionalString(key: String): String? = if (isNull(key)) null else getString(key)
-    fun encode(data: AppData, includeCredentials: Boolean = false): String = JSONObject().apply {
+    /**
+     * [indent] separates the two readers of this format. An exported backup is opened by people, so
+     * it stays indented. The encrypted file on disk is not, and indenting it inflated every write.
+     */
+    fun encode(data: AppData, includeCredentials: Boolean = false, indent: Int = 2): String = JSONObject().apply {
         put("schema", 4)
         put("ready", data.ready)
         GasappCodec.encode(this, data, includeCredentials)
@@ -63,7 +67,7 @@ object DataCodec {
         if (includeCredentials && data.credentials != null) put("credentials", JSONObject().apply {
             put("username", data.credentials.username); put("password", data.credentials.password)
         })
-    }.toString(2)
+    }.let { if (indent > 0) it.toString(indent) else it.toString() }
 
     fun decode(raw: String, allowCredentials: Boolean = false): AppData {
         require(raw.length <= 2_000_000) { "파일이 너무 커요. 2MB 이하의 백업 파일을 선택해 주세요." }
@@ -164,12 +168,16 @@ class SecureStore(context: Context) {
     }
     fun write(data: AppData) = synchronized(monitor) { writeLocked(data) }
     fun update(transform: (AppData) -> AppData): AppData = synchronized(monitor) {
-        transform(readLocked()).also { writeLocked(it) }
+        val current = readLocked()
+        // Re-picking the value already stored costs a full encrypt and rewrite for no change. The
+        // transaction and its merge are unchanged; only a write that would produce the same state
+        // is skipped, so a changed setting still reaches disk before this returns.
+        transform(current).also { if (it != current) writeLocked(it) }
     }
     private fun writeLocked(data: AppData) {
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, key())
-        val bytes = byteArrayOf(1) + cipher.iv + cipher.doFinal(DataCodec.encode(data, true).toByteArray(Charsets.UTF_8))
+        val bytes = byteArrayOf(1) + cipher.iv + cipher.doFinal(DataCodec.encode(data, true, indent = 0).toByteArray(Charsets.UTF_8))
         val stream = file.startWrite()
         try { stream.write(bytes); file.finishWrite(stream) } catch (e: Exception) { file.failWrite(stream); throw e }
     }

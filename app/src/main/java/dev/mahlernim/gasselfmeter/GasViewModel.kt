@@ -150,6 +150,22 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
         save(data.copy(periods = next.sortedBy { it.start }))
         message = "사용 이력을 저장했어요."
     }
+    /**
+     * Correct a row the user typed in themselves. Supplier-imported periods are left alone: they
+     * carry the connection's meter key and are rewritten by the next sync, so an edit there would
+     * silently disappear. [Estimator.validatePeriods] still rejects an edit that would overlap.
+     */
+    fun editPeriod(original: UsagePeriod, start: String, end: String, usage: String, onResult: (String?) -> Unit = {}) = attempt(onResult) {
+        require(original.manual) { "공급사에서 가져온 이력은 수정할 수 없어요." }
+        val edited = UsagePeriod(LocalDate.parse(start).toString(), LocalDate.parse(end).toString(), number(usage))
+        mutateStored { latest ->
+            check(original in latest.periods) { "이 사용 이력이 이미 변경되었어요. 목록을 다시 확인해 주세요." }
+            val next = (latest.periods - original + edited).sortedBy { it.start }
+            Estimator.validatePeriods(next)
+            latest.copy(periods = next)
+        }
+        message = "사용 이력을 수정했어요."
+    }
     fun deletePeriod(period: UsagePeriod, onResult: (String?) -> Unit = {}) = attempt(onResult) {
         mutateStored { latest ->
             check(period in latest.periods) { "이 사용 이력이 이미 변경되었어요. 목록을 다시 확인해 주세요." }
