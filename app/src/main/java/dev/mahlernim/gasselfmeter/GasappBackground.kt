@@ -51,7 +51,7 @@ internal object GasappBackground {
             if (data.cachedGasappTarget?.end == today().toString()) text = reminderText(data, data.cachedGasappTarget, System.currentTimeMillis(), failed = true)
         }
         if (!worker.isStopped && BackgroundState.sameAccount(store.read(), initial)) text?.let {
-            notify(context, 2, SubmissionScheduler.CHANNEL, "자가검침 제출 안내", "똑똑 자가검침 AI", it)
+            notify(context, 2, SubmissionScheduler.CHANNEL, "자가검침 제출 안내", "똑똑 자가검침 AI", it, AppTabs.SUBMISSION)
         }
         return ListenableWorker.Result.success()
     }
@@ -63,7 +63,7 @@ internal object GasappBackground {
         val data = GasappBridge.check(context)
         if (!BackgroundState.sameAccount(data, initial) || !data.submissionSettings.reminder) return ListenableWorker.Result.success()
         val text = reminderText(data, data.cachedGasappTarget, System.currentTimeMillis())
-        if (text != null) notify(context, 3, SubmissionScheduler.CHANNEL, "자가검침 제출 안내", "똑똑 자가검침 AI", text)
+        if (text != null) notify(context, 3, SubmissionScheduler.CHANNEL, "자가검침 제출 안내", "똑똑 자가검침 AI", text, AppTabs.SUBMISSION)
         else context.getSystemService(NotificationManager::class.java).cancel(3)
         return ListenableWorker.Result.success()
     }

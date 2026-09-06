@@ -39,10 +39,18 @@ object Reminders {
     }
 }
 
+/** Tab indices shared by the bottom bar and by notification destinations. */
+object AppTabs {
+    const val EXTRA = "dev.mahlernim.gasselfmeter.TAB"
+    const val METER = 0
+    const val SUBMISSION = 1
+}
+
 object SubmissionScheduler {
     const val CHANNEL = "meter-submission"
     fun schedule(context: Context, data: AppData) {
-        val connected = data.ready && ((data.credentials != null && Providers.get(data.profile.providerId).passwordConnection) || data.gasappConnection != null || data.energyTalkConnection != null)
+        val connected = data.ready && !data.profile.reconnectRequired &&
+            ((data.credentials != null && Providers.get(data.profile.providerId).passwordConnection) || data.gasappConnection != null || data.energyTalkConnection != null)
         WorkManager.getInstance(context).cancelUniqueWork("meter-auto-submit-now")
         daily<SubmissionWorker>(context, "meter-auto-submit", connected && data.submissionSettings.automatic &&
             Providers.get(data.profile.providerId).automaticSubmission, 10, network = true)
@@ -52,11 +60,15 @@ object SubmissionScheduler {
     }
 }
 
-internal fun notify(context: Context, id: Int, channel: String, channelName: String, title: String, text: String) {
+internal fun notify(context: Context, id: Int, channel: String, channelName: String, title: String, text: String,
+    destination: Int = AppTabs.METER) {
     if (Build.VERSION.SDK_INT >= 33 && context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
     val manager = context.getSystemService(NotificationManager::class.java)
     manager.createNotificationChannel(NotificationChannel(channel, channelName, NotificationManager.IMPORTANCE_DEFAULT))
-    val intent = PendingIntent.getActivity(context, id, Intent(context, MainActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+    // Carry the destination so a submission notice opens the submission tab instead of whichever
+    // tab the activity happens to be restored on. Tapping it never submits anything by itself.
+    val target = Intent(context, MainActivity::class.java).putExtra(AppTabs.EXTRA, destination)
+    val intent = PendingIntent.getActivity(context, id, target, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
     manager.notify(id, NotificationCompat.Builder(context, channel).setSmallIcon(R.drawable.ic_meter).setContentTitle(title)
         .setContentText(text).setStyle(NotificationCompat.BigTextStyle().bigText(text)).setContentIntent(intent)
         .setAutoCancel(true).setVisibility(NotificationCompat.VISIBILITY_PRIVATE).build())
@@ -68,6 +80,7 @@ class SubmissionWorker(context: Context, params: WorkerParameters) : Worker(cont
         try {
             val store = SecureStore(applicationContext)
             var data = try { store.read() } catch (_: Exception) { return Result.failure() }
+            if (data.profile.reconnectRequired) return Result.success()
             if (data.gasappConnection != null) return GasappBackground.automatic(applicationContext, this)
             val expected = data
             val credentials = data.credentials ?: return Result.success()
@@ -121,6 +134,12 @@ class SubmissionWorker(context: Context, params: WorkerParameters) : Worker(cont
                 }
             } catch (e: Exception) {
                 Diagnostics.record(applicationContext, expected.profile.providerId, "submit", e)
+                // A rejected password stops background login. An in-flight send still resolves below.
+                if (BackgroundState.rejectedCredentials(e)) runCatching {
+                    val held = store.update { BackgroundState.holdConnection(it, expected) }
+                    SubmissionScheduler.schedule(applicationContext, held)
+                    ProviderRefresh.schedule(applicationContext, held)
+                }
                 if (pending != null) {
                     store.update { BackgroundState.finish(it, expected, pending!!.copy(status = "uncertain", detail = ReminderPolicy.UNCERTAIN)) }
                     text = ReminderPolicy.UNCERTAIN
@@ -128,7 +147,7 @@ class SubmissionWorker(context: Context, params: WorkerParameters) : Worker(cont
                     text = ReminderPolicy.submissionText(data, target, System.currentTimeMillis(), failed = true)
                 }
             }
-            if (BackgroundState.sameAccount(store.read(), expected)) text?.let { notify(applicationContext, 2, SubmissionScheduler.CHANNEL, "자가검침 제출 안내", "똑똑 자가검침 AI", it) }
+            if (BackgroundState.sameAccount(store.read(), expected)) text?.let { notify(applicationContext, 2, SubmissionScheduler.CHANNEL, "자가검침 제출 안내", "똑똑 자가검침 AI", it, AppTabs.SUBMISSION) }
             return Result.success()
         } finally { SubmissionGate.lock.unlock() }
     }
@@ -141,7 +160,7 @@ class SubmissionReminderWorker(context: Context, params: WorkerParameters) : Wor
         try {
             val store = SecureStore(applicationContext)
             var data = store.read()
-            if (!data.submissionSettings.reminder) return Result.success()
+            if (!data.submissionSettings.reminder || data.profile.reconnectRequired) return Result.success()
             if (data.gasappConnection != null) return GasappBackground.remind(applicationContext)
             if (data.energyTalkConnection != null || Providers.get(data.profile.providerId).samchully || Providers.get(data.profile.providerId).direct) {
                 val expected = data
@@ -150,7 +169,7 @@ class SubmissionReminderWorker(context: Context, params: WorkerParameters) : Wor
                     else SamchullyBridge.checkStatus(applicationContext)
                 if (!BackgroundState.sameAccount(data, expected) || !data.submissionSettings.reminder) return Result.success()
                 val text = ReminderPolicy.submissionText(data, data.cachedSelfRead, System.currentTimeMillis())
-                if (text != null) notify(applicationContext, 3, SubmissionScheduler.CHANNEL, "자가검침 제출 안내", "똑똑 자가검침 AI", text)
+                if (text != null) notify(applicationContext, 3, SubmissionScheduler.CHANNEL, "자가검침 제출 안내", "똑똑 자가검침 AI", text, AppTabs.SUBMISSION)
                 else applicationContext.getSystemService(NotificationManager::class.java).cancel(3)
                 return Result.success()
             }
@@ -165,13 +184,21 @@ class SubmissionReminderWorker(context: Context, params: WorkerParameters) : Wor
             data = store.update { latest -> if (BackgroundState.sameAccount(latest, expected)) latest.copy(cachedSelfRead = target) else latest }
             if (!BackgroundState.sameAccount(data, expected) || !data.submissionSettings.reminder || data.cachedSelfRead != target) return Result.success()
             val text = ReminderPolicy.submissionText(data, target, System.currentTimeMillis())
-            if (text != null) notify(applicationContext, 3, SubmissionScheduler.CHANNEL, "자가검침 제출 안내", "똑똑 자가검침 AI", text)
+            if (text != null) notify(applicationContext, 3, SubmissionScheduler.CHANNEL, "자가검침 제출 안내", "똑똑 자가검침 AI", text, AppTabs.SUBMISSION)
             else applicationContext.getSystemService(NotificationManager::class.java).cancel(3)
             return Result.success()
         } catch (e: Exception) {
-            val provider = runCatching { SecureStore(applicationContext).read().profile.providerId }.getOrDefault("unknown")
-            Diagnostics.record(applicationContext, provider, "background", e)
-            return Result.retry()
+            val store = runCatching { SecureStore(applicationContext) }.getOrNull()
+            val current = store?.let { runCatching { it.read() }.getOrNull() }
+            Diagnostics.record(applicationContext, current?.profile?.providerId ?: "unknown", "background", e)
+            // Only transient failures are worth another attempt inside this period.
+            if (!BackgroundState.rejectedCredentials(e) || store == null || current == null) return Result.retry()
+            runCatching {
+                val held = store.update { BackgroundState.holdConnection(it, current) }
+                SubmissionScheduler.schedule(applicationContext, held)
+                ProviderRefresh.schedule(applicationContext, held)
+            }
+            return Result.failure()
         }
         finally { SubmissionGate.lock.unlock() }
     }

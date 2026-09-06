@@ -35,6 +35,11 @@ data class Profile(
     val plannedDate: String? = null, val syncTime: Long? = null, val reminder: Boolean = false,
     val reminderDay: Int = 7, val reminderHour: Int = 19,
     val reminderRepeatCount: Int = 3, val customerNumber: String = "",
+    /**
+     * Set when the supplier rejected the stored credentials. Background login stays off until the
+     * user reconnects, so a stale password cannot be replayed on every periodic run.
+     */
+    val reconnectRequired: Boolean = false,
 )
 data class Credentials(val username: String, val password: String) {
     init { require(username.isNotBlank() && password.isNotBlank()) { "아이디와 비밀번호를 입력해 주세요." } }
@@ -341,6 +346,13 @@ object HistorySummary {
             month.copy(usage = bill?.usage ?: month.usage, billedAmount = bill?.amount ?: month.billedAmount)
         }
     }
+
+    /**
+     * Trailing [count] months ending with [current], inclusive. [months] treats its bound as
+     * exclusive, which hid a bill issued in the month being viewed.
+     */
+    fun through(data: AppData, current: YearMonth, count: Int = 24): List<MonthlyHistory> =
+        months(data, current.plusMonths(1), count)
 
     fun months(periods: List<UsagePeriod>, latest: YearMonth, count: Int = 24): List<MonthlyHistory> {
         require(count in 1..120)

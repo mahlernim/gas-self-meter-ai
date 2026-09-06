@@ -11,6 +11,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
@@ -34,6 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -86,26 +88,58 @@ object AppLinks {
 }
 
 class MainActivity : ComponentActivity() {
+    // The tab a notification asked for, consumed once so a rotation cannot reapply it.
+    private var destination by mutableStateOf<Int?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        // The app draws a light surface in either system theme, so the bars keep dark icons.
+        // Left on the default the icons turn light in system dark mode and vanish on the background.
+        val bars = SystemBarStyle.light(Color.Transparent.toArgb(), Color.Transparent.toArgb())
+        enableEdgeToEdge(statusBarStyle = bars, navigationBarStyle = bars)
+        destination = tabOf(intent)
         setContent {
             MaterialTheme(colorScheme = lightColorScheme(primary = Teal, onPrimary = Color.White,
                 primaryContainer = Pale, onPrimaryContainer = DeepTeal, secondary = Coral,
                 secondaryContainer = Pale, onSecondaryContainer = Teal,
                 background = Paper, onBackground = Ink, surface = Paper, onSurface = Ink,
                 surfaceContainer = Color.White, surfaceContainerHigh = Color(0xFFEEF2EC), outline = Color(0xFF80938D))) {
-                GasApp()
+                GasApp(destination = destination, onDestinationHandled = { destination = null })
             }
         }
     }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        destination = tabOf(intent)
+    }
+
+    private fun tabOf(intent: Intent?): Int? =
+        intent?.getIntExtra(AppTabs.EXTRA, -1)?.takeIf { it in AppTabs.METER..AppTabs.SUBMISSION }
 }
 
-@Composable fun GasApp(vm: GasViewModel = viewModel()) {
+/** Deletion targets travel as values so a concurrent sync cannot shift what the dialog removes. */
+private sealed interface Confirmation {
+    data object Erase : Confirmation
+    data object Meter : Confirmation
+    data class DeletePeriod(val period: UsagePeriod) : Confirmation
+    data class DeleteObservation(val observation: Observation) : Confirmation
+}
+
+@Composable fun GasApp(vm: GasViewModel = viewModel(), destination: Int? = null, onDestinationHandled: () -> Unit = {}) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    var started by remember { mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) }
     DisposableEffect(lifecycleOwner, vm) {
-        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_RESUME) vm.onForeground() }
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> started = true
+                Lifecycle.Event.ON_STOP -> started = false
+                Lifecycle.Event.ON_RESUME -> vm.onForeground()
+                else -> Unit
+            }
+        }
         lifecycleOwner.lifecycle.addObserver(observer)
         if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) vm.onForeground()
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
@@ -115,7 +149,7 @@ class MainActivity : ComponentActivity() {
     var calibration by remember { mutableStateOf<String?>(null) }
     var addHistory by remember { mutableStateOf(false) }
     var loginProviderId by remember { mutableStateOf<String?>(null) }
-    var confirmation by remember { mutableStateOf<String?>(null) }
+    var confirmation by remember { mutableStateOf<Confirmation?>(null) }
     var restorePreview by remember { mutableStateOf<AppData?>(null) }
     var licenses by remember { mutableStateOf(false) }
     var diagnostics by remember { mutableStateOf(false) }
@@ -124,7 +158,12 @@ class MainActivity : ComponentActivity() {
     var pendingSubmissionSettings by remember { mutableStateOf<SubmissionSettings?>(null) }
     var submitValue by remember { mutableStateOf<Double?>(null) }
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(Unit) { while (true) { now = System.currentTimeMillis(); delay(30_000) } }
+    // The estimate rises through the day, so the clock keeps moving while the screen is visible.
+    // It stops once the app is no longer started and catches up immediately on return.
+    LaunchedEffect(started) { while (started) { now = System.currentTimeMillis(); delay(30_000) } }
+    LaunchedEffect(destination) {
+        if (destination != null) { tab = destination; onDestinationHandled() }
+    }
     LaunchedEffect(vm.message) { vm.message?.let { snackbar.showSnackbar(it); vm.message = null } }
     val data = vm.data
     val estimate = remember(data, now) { Estimator.estimate(data, now) }
@@ -153,13 +192,19 @@ class MainActivity : ComponentActivity() {
         else vm.setReminder(granted, vm.data.profile.reminderDay, vm.data.profile.reminderHour)
         if (!granted) vm.message = "알림 권한이 꺼져 있어요. 기기 설정에서 허용할 수 있어요."
     }
-    fun open(url: String) = vm.attempt { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
-    fun openUpdate() = vm.attempt {
-        try {
+    // Opening a link is not a storage transaction. Routing it through vm.attempt showed a progress
+    // bar for a browser launch and refused outright while a sync was running.
+    fun open(url: String) {
+        runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+            .onFailure { vm.message = "이 링크를 열 수 있는 앱이 없어요." }
+    }
+    fun openUpdate() {
+        runCatching {
             context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(AppLinks.PLAY_STORE)).setPackage("com.android.vending"))
-        } catch (_: ActivityNotFoundException) {
+        }.recoverCatching {
+            if (it !is ActivityNotFoundException) throw it
             context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(AppLinks.TESTING_PAGE)))
-        }
+        }.onFailure { vm.message = "Play 스토어나 브라우저를 열지 못했어요." }
     }
 
     Scaffold(containerColor = Paper, snackbarHost = { SnackbarHost(snackbar) },
@@ -189,7 +234,7 @@ class MainActivity : ComponentActivity() {
                 Page {
                     Title("기록을 보호하고 있어요", "저장 파일을 읽지 못했습니다. 기존 파일은 보존됩니다.")
                     ActionButton("백업 가져오기", Icons.Outlined.FileOpen) { importer.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) }
-                    TextButton(onClick = { confirmation = "erase" }) { Text("저장 데이터 초기화") }
+                    TextButton(onClick = { confirmation = Confirmation.Erase }) { Text("저장 데이터 초기화") }
                 }
             } else if (!data.ready) {
                 Welcome(vm.busy, { vm.manual(it) }, { loginProviderId = it }, { vm.loadDemo() }, { importer.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) }, ::open, { diagnostics = true })
@@ -211,7 +256,7 @@ class MainActivity : ComponentActivity() {
                         notification.launch(Manifest.permission.POST_NOTIFICATIONS)
                     } else vm.setSubmissionSettings(settings)
                 })
-                2 -> HistoryPage(data, { addHistory = true }, { period -> confirmation = "period:${data.periods.indexOf(period)}" }, { observation -> confirmation = "observation:${observation.time}" })
+                2 -> HistoryPage(data, { addHistory = true }, { period -> confirmation = Confirmation.DeletePeriod(period) }, { observation -> confirmation = Confirmation.DeleteObservation(observation) })
                 3 -> SettingsPage(data, {
                     notificationPurpose = "calibration"
                     if (Build.VERSION.SDK_INT >= 33) notification.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -220,7 +265,7 @@ class MainActivity : ComponentActivity() {
                     { day, hour -> vm.setReminder(data.profile.reminder, day, hour) }, vm::setReminderRepeatCount,
                     { loginProviderId = if (data.energyTalkConnection != null || data.cachedSelfRead?.contract?.bp?.startsWith("energytalk:") == true) "energytalk:${data.profile.providerId}" else data.profile.providerId }, { vm.forgetCredentials() },
                     { export.launch("gas-self-meter-${today()}.json") }, { importer.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) },
-                    { confirmation = "meter" }, { confirmation = "erase" }, ::openUpdate, { licenses = true }, ::open, vm.busy, { diagnostics = true },
+                    { confirmation = Confirmation.Meter }, { confirmation = Confirmation.Erase }, ::openUpdate, { licenses = true }, ::open, vm.busy, { diagnostics = true },
                     { loginProviderId = "energytalk:${data.profile.providerId}" })
             }
         }
@@ -269,30 +314,32 @@ class MainActivity : ComponentActivity() {
     LaunchedEffect(data.profile.syncTime) { if (data.profile.syncTime != null && vm.contracts.isEmpty()) loginProviderId = null }
     confirmation?.let { action ->
         var actionError by remember(action) { mutableStateOf<String?>(null) }
-        val title = when { action == "erase" -> "기기의 모든 기록을 지울까요?"; action == "meter" -> "새 계량기로 시작할까요?"; else -> "이 기록을 삭제할까요?" }
+        val title = when (action) {
+            Confirmation.Erase -> "기기의 모든 기록을 지울까요?"
+            Confirmation.Meter -> "새 계량기로 시작할까요?"
+            else -> "이 기록을 삭제할까요?"
+        }
         val text = when (action) {
-            "erase" -> "로그인 정보, 사용 이력, 확인 기록과 알림 설정을 지워요. 필요한 기록은 먼저 내보내 주세요."
-            "meter" -> "이전 실측은 보관하고 새 계량기의 숫자로 다시 시작해요. 작년 사용 이력은 계절 추정에 계속 활용해요."
+            Confirmation.Erase -> "로그인 정보, 사용 이력, 확인 기록과 알림 설정을 지워요. 필요한 기록은 먼저 내보내 주세요."
+            Confirmation.Meter -> "이전 실측은 보관하고 새 계량기의 숫자로 다시 시작해요. 작년 사용 이력은 계절 추정에 계속 활용해요."
             else -> "삭제한 기록은 추정에 사용하지 않아요."
         }
+        // Deletes report back so a target changed by a concurrent sync says so instead of closing
+        // silently or removing whatever now sits at the same position.
+        val finish: (String?) -> Unit = { error -> actionError = error; if (error == null) confirmation = null }
         AlertDialog(onDismissRequest = { if (!vm.busy) confirmation = null }, title = { Text(title) }, text = { Column {
             Text(text)
             actionError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         } },
             confirmButton = { TextButton(onClick = {
-                if (action == "meter") {
-                    vm.resetMeter { error ->
-                        actionError = error
-                        if (error == null) { tab = 0; confirmation = null }
-                    }
-                    return@TextButton
+                when (action) {
+                    Confirmation.Meter -> vm.resetMeter { error -> actionError = error; if (error == null) { tab = 0; confirmation = null } }
+                    Confirmation.Erase -> { vm.erase(); tab = 0; confirmation = null }
+                    is Confirmation.DeletePeriod -> vm.deletePeriod(action.period, finish)
+                    is Confirmation.DeleteObservation -> vm.deleteObservation(action.observation, finish)
                 }
-                when {
-                    action == "erase" -> { vm.erase(); tab = 0 }
-                    action.startsWith("period:") -> data.periods.getOrNull(action.substringAfter(":").toInt())?.let(vm::deletePeriod)
-                    action.startsWith("observation:") -> data.observations.find { it.time == action.substringAfter(":").toLong() }?.let(vm::deleteObservation)
-                }; confirmation = null
-            }, enabled = !vm.busy) { Text(if (action == "meter") "새로 시작" else "삭제") } }, dismissButton = { TextButton(onClick = { confirmation = null }, enabled = !vm.busy) { Text("취소") } })
+            }, enabled = !vm.busy) { Text(if (action == Confirmation.Meter) "새로 시작" else "삭제") } },
+            dismissButton = { TextButton(onClick = { confirmation = null }, enabled = !vm.busy) { Text("취소") } })
     }
     restorePreview?.let { preview ->
         var error by remember(preview) { mutableStateOf<String?>(null) }
@@ -653,7 +700,7 @@ class MainActivity : ComponentActivity() {
 
 @Composable private fun HistoryPage(data: AppData, add: () -> Unit, delete: (UsagePeriod) -> Unit, deleteObservation: (Observation) -> Unit) {
     val historyMonth = YearMonth.from(today())
-    val months = remember(data.periods, data.gasappBills, data.samchullyBills, data.energyTalkBills, data.directBills, data.profile.providerId, historyMonth) { HistorySummary.months(data, historyMonth).dropWhile { it.usage == null && it.billedAmount == null }.dropLastWhile { it.usage == null && it.billedAmount == null } }
+    val months = remember(data.periods, data.gasappBills, data.samchullyBills, data.energyTalkBills, data.directBills, data.profile.providerId, historyMonth) { HistorySummary.through(data, historyMonth).dropWhile { it.usage == null && it.billedAmount == null }.dropLastWhile { it.usage == null && it.billedAmount == null } }
     var selectedMonth by rememberSaveable { mutableStateOf<String?>(null) }
     val selected = months.find { it.month.toString() == selectedMonth }
     val chartScroll = rememberScrollState(Int.MAX_VALUE)

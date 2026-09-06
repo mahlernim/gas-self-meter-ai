@@ -73,7 +73,9 @@ class SkensClient(private val provider: Provider, private val credentials: Crede
     fun login(): List<Contract> {
         request("login/login.do")
         val result = JSONObject(request("login/loginProcess.do", mapOf("id" to credentials.username, "pw" to credentials.password, "returnURL" to "/${provider.id}/read/selfRead.do")))
-        check(result.optString("errCd") == "S") { "로그인하지 못했어요. 아이디와 비밀번호를 확인해 주세요." }
+        // Classified rather than a bare check so background work can tell a rejected password from
+        // a transient failure and stop replaying the stored credentials.
+        if (result.optString("errCd") != "S") throw ProviderFailure("login", "authentication")
         return parseContracts(request("read/selfRead.do")).also { check(it.isNotEmpty()) { "연결된 계약이 없어요. 공급사 홈페이지에서 사용 계약을 확인해 주세요." } }
     }
     private fun meterRow(contract: Contract): JSONObject {
@@ -118,19 +120,18 @@ class SkensClient(private val provider: Provider, private val credentials: Crede
         val target = parseSelfReadTarget(meterRow, contract)
         val params = mapOf("bpno" to contract.bp, "cano" to contract.ca, "compcd" to provider.skensCode!!, "GUBUN" to "02")
         val first = request("charge/askDetail.do", params + ("date" to ""))
-        document(first)
-        val selected = Jsoup.parse(first).selectFirst("#budat")?.attr("value")
+        // One parse. document() still performs the login-form and error-page checks.
+        val selected = document(first).selectFirst("#budat")?.attr("value")
         val months = (Regex("fnGetAskDetail\\([^)]*[\"'](20\\d{4})[\"']").findAll(first).map { it.groupValues[1] }.toSet() + listOfNotNull(selected?.takeIf { it.matches(Regex("20\\d{4}")) })).sortedDescending().take(25)
         check(months.isNotEmpty()) { "청구 이력을 찾지 못했어요. 공급사 페이지가 변경되었을 수 있어요." }
-        val firstMonth = Jsoup.parse(first).selectFirst("#budat")?.attr("value")
-        val wanted = months.filter { it !in knownMonths || it == firstMonth }
+        val wanted = months.filter { it !in knownMonths || it == selected }
         val executor = Executors.newFixedThreadPool(2)
         var completed = 0
         val fetched = try {
             val completion = ExecutorCompletionService<Result<List<UsagePeriod>>>(executor)
             wanted.forEach { month -> completion.submit(Callable {
                 runCatching {
-                    val html = if (firstMonth == month) first else request("charge/askDetail.do", params + ("date" to month))
+                    val html = if (selected == month) first else request("charge/askDetail.do", params + ("date" to month))
                     parseBill(html, month)
                 }
             }) }
