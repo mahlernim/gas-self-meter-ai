@@ -4,7 +4,7 @@ The Android client implements phone verification, required terms, member session
 
 ## Protocol sources
 
-Independently implemented from protocol observations in the [official frontend](https://app.gasapp.co.kr/) and the [public reference client](https://github.com/af950833/korea_gasapp/tree/f9809867c89779378feb8b5e3880b49abae2589e). External implementation source is not copied. The reference repository did not supply an applicable license when inspected.
+Independently implemented from protocol observations, including the [official frontend](https://app.gasapp.co.kr/). Third-party implementation source is not redistributed.
 
 On 2026-09-04, the official `70526.28f463236afe2ff0a022.chunk.js` used `GET contracts`, `home`, `meters`, `bills/summary`, `indications` and `indications/history`. The history page requests six rows, displays five, and uses the sixth row ID as the next inclusive cursor. Annual bills use `f=annual` and `onlyUnpay=N`. Registration posts customer and contract numbers. Channel changes put the contract number to `indications/channel`.
 

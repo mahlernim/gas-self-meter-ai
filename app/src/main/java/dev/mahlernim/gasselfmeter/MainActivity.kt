@@ -171,6 +171,15 @@ class MainActivity : ComponentActivity() {
         } }
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
+            if (vm.reconnectRequired && data.ready) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("공급사에 다시 로그인해 주세요.", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                    TextButton(enabled = !vm.busy, onClick = {
+                        loginProviderId = if (data.energyTalkConnection != null) "energytalk:${data.profile.providerId}" else data.profile.providerId
+                        vm.dismissReconnect()
+                    }) { Text("다시 연결") }
+                }
+            }
             if (vm.busy) {
                 if (vm.progressTotal > 0) LinearProgressIndicator(progress = { (vm.progressCurrent.toFloat() / vm.progressTotal).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
                 else LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -226,10 +235,10 @@ class MainActivity : ComponentActivity() {
     } }
     submitValue?.let { value ->
         val provider = Providers.get(data.profile.providerId)
-        val valueText = decimalText(value, if (provider.gasapp || provider.samchully || data.energyTalkConnection != null) 0 else 1)
+        val valueText = decimalText(value, if (provider.gasapp || provider.samchully || provider.direct || data.energyTalkConnection != null) 0 else 1)
         AlertDialog(onDismissRequest = { submitValue = null }, title = { Text("검침값을 공급사에 입력할까요?") },
             text = { Text("${provider.name}에 $valueText m³를 입력합니다." +
-                (if (provider.gasapp || provider.samchully || data.energyTalkConnection != null) "\n\n소수점 아래를 제외한 정수 지침을 제출해요." else "") +
+                (if (provider.gasapp || provider.samchully || provider.direct || data.energyTalkConnection != null) "\n\n소수점 아래를 제외한 정수 지침을 제출해요." else "") +
                 "\n\n전송 직전에 기간과 기존 제출 여부를 다시 확인하며, 결과가 불확실하면 자동으로 다시 보내지 않습니다.") },
             confirmButton = { TextButton(onClick = { vm.submitReading(value); submitValue = null }) { Text("$valueText m³ 입력") } },
             dismissButton = { TextButton(onClick = { submitValue = null }) { Text("취소") } })
@@ -544,7 +553,7 @@ class MainActivity : ComponentActivity() {
 @Composable private fun SubmissionPage(data: AppData, target: SelfReadTarget?, now: Long, estimate: Estimate, busy: Boolean,
     refresh: () -> Unit, submit: (Double) -> Unit,
     changeSettings: (SubmissionSettings) -> Unit) {
-    val submissionDigits = if (data.gasappConnection != null || data.energyTalkConnection != null || data.profile.providerId == "samchully") 0 else 1
+    val submissionDigits = if (data.gasappConnection != null || data.energyTalkConnection != null || data.profile.providerId == "samchully" || Providers.get(data.profile.providerId).direct) 0 else 1
     val settings = data.submissionSettings
     val provider = Providers.get(data.profile.providerId)
     val demo = data.profile.meter == "demo"
@@ -567,6 +576,7 @@ class MainActivity : ComponentActivity() {
     val decision = remember(data, target, gasappTarget, now) {
         if (data.energyTalkConnection != null) EnergyTalkSubmissionPolicy.decide(data, target, now, automatic = false)
         else if (provider.samchully) SamchullySubmissionPolicy.decide(data, target, now, automatic = false)
+        else if (provider.direct) DirectSubmissionPolicy.decide(data, target, now, automatic = false)
         else if (provider.gasapp) GasappSubmissionPolicy.decide(data, gasappTarget, now, automatic = false)
         else SubmissionPolicy.decide(data, target, now, automatic = false)
     }
@@ -643,7 +653,7 @@ class MainActivity : ComponentActivity() {
 
 @Composable private fun HistoryPage(data: AppData, add: () -> Unit, delete: (UsagePeriod) -> Unit, deleteObservation: (Observation) -> Unit) {
     val historyMonth = YearMonth.from(today())
-    val months = remember(data.periods, data.gasappBills, data.samchullyBills, data.energyTalkBills, data.profile.providerId, historyMonth) { HistorySummary.months(data, historyMonth).dropWhile { it.usage == null && it.billedAmount == null }.dropLastWhile { it.usage == null && it.billedAmount == null } }
+    val months = remember(data.periods, data.gasappBills, data.samchullyBills, data.energyTalkBills, data.directBills, data.profile.providerId, historyMonth) { HistorySummary.months(data, historyMonth).dropWhile { it.usage == null && it.billedAmount == null }.dropLastWhile { it.usage == null && it.billedAmount == null } }
     var selectedMonth by rememberSaveable { mutableStateOf<String?>(null) }
     val selected = months.find { it.month.toString() == selectedMonth }
     val chartScroll = rememberScrollState(Int.MAX_VALUE)
@@ -685,7 +695,7 @@ class MainActivity : ComponentActivity() {
         }
         ActionButton("과거 사용량 추가", Icons.Outlined.Add, onClick = add)
         Hint(Icons.Outlined.Lightbulb, "작년 같은 달과 앞뒤 달의 이력이 있으면 좋아요. 청구월보다 실제 사용 기간을 정확히 입력해 주세요.")
-        if (data.periods.isEmpty() && data.gasappBills.isEmpty() && data.samchullyBills.isEmpty() && data.energyTalkBills.isEmpty()) EmptyNote("아직 사용 이력이 없어요", "공급사 홈페이지나 청구서에서 과거 사용량을 확인해 입력해 주세요.")
+        if (data.periods.isEmpty() && data.gasappBills.isEmpty() && data.samchullyBills.isEmpty() && data.energyTalkBills.isEmpty() && data.directBills.isEmpty()) EmptyNote("아직 사용 이력이 없어요", "공급사 홈페이지나 청구서에서 과거 사용량을 확인해 입력해 주세요.")
         if (data.gasappBills.isNotEmpty()) Text("공급사 청구 사용량은 참고용이에요. 계량기 지침 추정에는 확인된 지침 차이와 직접 확인한 숫자를 사용해요.", style = MaterialTheme.typography.bodySmall, color = Muted)
         val repeatedBillMonths = data.gasappBills.groupingBy { it.month }.eachCount().filterValues { it > 1 }.keys
         if (repeatedBillMonths.isNotEmpty()) Text("같은 달의 청구가 여러 건 있어 모두 표시해요. 합계는 공급사 고지서에서 확인해 주세요.", style = MaterialTheme.typography.bodySmall, color = Muted)
@@ -705,6 +715,15 @@ class MainActivity : ComponentActivity() {
                 Text("${bill.billMonth.take(4)}.${bill.billMonth.takeLast(2)} 청구", color = Muted)
                 bill.amount?.let { Text("${decimalText(it, 0)}원", fontWeight = FontWeight.Bold) }
                 bill.reportedUsage?.let { Text("청구 사용량 ${decimalText(it)}") }
+            }
+            HorizontalDivider(color = Pale)
+        }
+        data.directBills.sortedByDescending { it.month }.forEach { bill ->
+            Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                Text("${bill.month.replace('-', '.')} 청구", color = Muted)
+                bill.usage?.let { Text("청구 사용량 ${decimalText(it)} m³") }
+                bill.amount?.let { Text("${decimalText(it, 0)}원", fontWeight = FontWeight.Bold) }
+                if (bill.start != null && bill.end != null) Text("${bill.start} ~ ${bill.end}", color = Muted)
             }
             HorizontalDivider(color = Pale)
         }

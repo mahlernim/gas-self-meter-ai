@@ -143,9 +143,10 @@ class SubmissionReminderWorker(context: Context, params: WorkerParameters) : Wor
             var data = store.read()
             if (!data.submissionSettings.reminder) return Result.success()
             if (data.gasappConnection != null) return GasappBackground.remind(applicationContext)
-            if (data.energyTalkConnection != null || Providers.get(data.profile.providerId).samchully) {
+            if (data.energyTalkConnection != null || Providers.get(data.profile.providerId).samchully || Providers.get(data.profile.providerId).direct) {
                 val expected = data
                 data = if (data.energyTalkConnection != null) EnergyTalkBridge.checkStatus(applicationContext)
+                    else if (Providers.get(data.profile.providerId).direct) DirectProviderBridge.checkStatus(applicationContext)
                     else SamchullyBridge.checkStatus(applicationContext)
                 if (!BackgroundState.sameAccount(data, expected) || !data.submissionSettings.reminder) return Result.success()
                 val text = ReminderPolicy.submissionText(data, data.cachedSelfRead, System.currentTimeMillis())
@@ -184,4 +185,3 @@ class ReminderWorker(context: Context, params: WorkerParameters) : Worker(contex
         return Result.success()
     }
 }
-

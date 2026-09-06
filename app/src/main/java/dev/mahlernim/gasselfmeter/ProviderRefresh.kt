@@ -22,6 +22,7 @@ object ProviderRefresh {
     fun refresh(context: Context, force: Boolean = false): AppData = SubmissionGate.lock.withLock {
         val store = SecureStore(context)
         val data = store.read()
+        if (Providers.get(data.profile.providerId).direct) return@withLock DirectProviderBridge.refresh(context, force)
         if (data.energyTalkConnection != null) return@withLock EnergyTalkBridge.refresh(context, force)
         if (data.gasappConnection != null) return@withLock GasappBridge.refresh(context, force).also { updated ->
             if (updated.cachedGasappTarget?.submitted == true) context.getSystemService(android.app.NotificationManager::class.java).cancel(3)
@@ -72,4 +73,3 @@ class ProviderRefreshWorker(context: Context, params: WorkerParameters) : Worker
         Result.retry()
     }
 }
-

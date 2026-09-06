@@ -56,8 +56,8 @@ class AlphaEditingFlowTest {
     }
 
     @Test fun disconnectedAndUnsupportedProvidersHaveNoSubmissionControls() {
-        val manual = listOf("daesung", "daesungclean", "haeyang", "myungsung")
-        for ((provider, title) in listOf("busan" to "공급사 연결이 필요해요") + manual.map { it to "앱에서 제출을 지원하지 않아요" }) {
+        val connectable = listOf("busan", "daesung", "daesungclean", "haeyang")
+        for ((provider, title) in connectable.map { it to "공급사 연결이 필요해요" } + ("myungsung" to "앱에서 제출을 지원하지 않아요")) {
             SecureStore(context).write(AppData(profile = Profile(providerId = provider), ready = true))
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
                 awaitReady(scenario)

@@ -87,6 +87,7 @@ object SamchullyBridge {
             gasappConnection = null, cachedGasappTarget = null,
             gasappBills = emptyList(), gasappMeterChangeObservedAt = null,
             energyTalkConnection = null, energyTalkBills = emptyList(),
+            directBills = emptyList(),
         )
     }
 

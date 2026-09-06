@@ -11,6 +11,10 @@ internal fun householdInfo(data: AppData): List<Pair<String, String>> {
     val target = data.cachedSelfRead?.takeIf {
         provider.skens && SkensClient.contractKey(provider, it.contract) == data.profile.contract
     }
+    val directTarget = data.cachedSelfRead?.takeIf {
+        provider.direct && it.contract.ca == provider.id &&
+            DirectIdentity.contract(provider.id, it.contract.bp) == data.profile.contract && it.installation == data.profile.meter
+    }
     val account = (data.gasappConnection?.account ?: data.cachedGasappTarget?.account)?.takeIf {
         provider.gasapp && GasappApi.companyProviders[it.company] == provider.id && it.key == data.profile.contract
     }
@@ -30,5 +34,9 @@ internal fun householdInfo(data: AppData): List<Pair<String, String>> {
             addValue("계량기번호", target.serial)
         }
         addValue("공급 주소", target?.address)
+        if (directTarget != null) {
+            addValue("계량기번호", if (provider.id == "haeyang") directTarget.serial.substringBeforeLast(':') else directTarget.serial)
+            addValue("공급 주소", directTarget.address)
+        }
     }
 }

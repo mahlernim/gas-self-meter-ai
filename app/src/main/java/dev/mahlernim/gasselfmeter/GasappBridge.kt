@@ -55,6 +55,7 @@ object GasappBridge {
             plannedDate = target.end, syncTime = now), periods = periods, ready = true, credentials = null,
             cachedSelfRead = null, gasappConnection = connection, cachedGasappTarget = target, gasappBills = bills,
             energyTalkConnection = null, energyTalkBills = emptyList(),
+            directBills = emptyList(),
             gasappMeterChangeObservedAt = replacementObservedAt(data, target, now))
     }
 
