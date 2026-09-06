@@ -146,9 +146,9 @@ private sealed interface Confirmation {
     }
     val snackbar = remember { SnackbarHostState() }
     var tab by rememberSaveable { mutableIntStateOf(0) }
-    var calibration by remember { mutableStateOf<String?>(null) }
-    var addHistory by remember { mutableStateOf(false) }
-    var loginProviderId by remember { mutableStateOf<String?>(null) }
+    var calibration by rememberSaveable { mutableStateOf<String?>(null) }
+    var addHistory by rememberSaveable { mutableStateOf(false) }
+    var loginProviderId by rememberSaveable { mutableStateOf<String?>(null) }
     var confirmation by remember { mutableStateOf<Confirmation?>(null) }
     var restorePreview by remember { mutableStateOf<AppData?>(null) }
     var licenses by remember { mutableStateOf(false) }
@@ -949,7 +949,7 @@ private sealed interface Confirmation {
 }
 
 @Composable private fun CalibrationDialog(initial: String, estimate: Estimate, busy: Boolean, close: () -> Unit, save: (String, (String?) -> Unit) -> Unit) {
-    var value by remember { mutableStateOf(initial.replace(",", "")) }
+    var value by rememberSaveable { mutableStateOf(initial.replace(",", "")) }
     var error by remember { mutableStateOf<String?>(null) }
     AlertDialog(onDismissRequest = { if (!busy) close() }, title = { Text("계량기를 보고 확인했나요?") },
         text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -969,9 +969,9 @@ private sealed interface Confirmation {
 
 @Composable private fun HistoryDialog(busy: Boolean, close: () -> Unit, save: (String, String, String, (String?) -> Unit) -> Unit) {
     val month = YearMonth.from(today()).minusYears(1)
-    var start by remember { mutableStateOf(month.atDay(1).toString()) }
-    var end by remember { mutableStateOf(month.atEndOfMonth().toString()) }
-    var usage by remember { mutableStateOf("") }
+    var start by rememberSaveable { mutableStateOf(month.atDay(1).toString()) }
+    var end by rememberSaveable { mutableStateOf(month.atEndOfMonth().toString()) }
+    var usage by rememberSaveable { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     AlertDialog(onDismissRequest = { if (!busy) close() }, title = { Text("과거 사용량 추가") },
         text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -987,10 +987,11 @@ private sealed interface Confirmation {
 
 @Composable private fun LoginDialog(provider: Provider, busy: Boolean, progress: String, progressCurrent: Int, progressTotal: Int, contracts: List<Contract>, error: String?, close: () -> Unit,
     login: (String, String, Boolean) -> Unit, choose: (Contract) -> Unit, open: (String) -> Unit, diagnostics: () -> Unit) {
-    var username by remember { mutableStateOf("") }
+    var username by rememberSaveable { mutableStateOf("") }
+    // Deliberately not saveable: a password or its visibility must never reach a state bundle.
     var password by remember { mutableStateOf("") }
     var visible by remember { mutableStateOf(false) }
-    var rememberPassword by remember { mutableStateOf(true) }
+    var rememberPassword by rememberSaveable { mutableStateOf(true) }
     AlertDialog(onDismissRequest = { if (!busy) close() }, title = { Text(if (contracts.size > 1) "사용 계약을 선택해 주세요" else "${provider.name} 연결") },
         text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             if (contracts.size > 1) contracts.forEach { contract -> OutlinedButton(onClick = { choose(contract) }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text(contract.label) } }

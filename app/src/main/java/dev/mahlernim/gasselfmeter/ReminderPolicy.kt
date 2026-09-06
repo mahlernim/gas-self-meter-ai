@@ -14,6 +14,27 @@ object ReminderPolicy {
         val cycleStart = now.toLocalDate().minusDays(elapsed.toLong())
         return data.observations.none { it.meter == data.profile.meter && it.time >= dayStart(cycleStart) }
     }
+
+    /**
+     * The next moment the calibration check is worth running, in Korean local time.
+     *
+     * A reminder cycle offers the chosen weekday plus the next [Profile.reminderRepeatCount] days,
+     * each at the chosen hour. A 24-hour periodic request could land anywhere in its window, and a
+     * run before the chosen hour produced nothing and then waited another whole day, so the check
+     * now aims at these occurrences instead. Late runs are covered by the repeat days, which keep
+     * their own dates rather than collapsing into one reminder a week.
+     */
+    fun nextCalibrationRun(profile: Profile, time: Long): Long {
+        var date = java.time.Instant.ofEpochMilli(time).atZone(Korea).toLocalDate()
+        // A full week plus a margin always contains the chosen weekday, whatever the repeat count.
+        repeat(9) {
+            val at = date.atTime(profile.reminderHour, 0).atZone(Korea).toInstant().toEpochMilli()
+            val offset = (date.dayOfWeek.value - profile.reminderDay + 7) % 7
+            if (at > time && offset <= profile.reminderRepeatCount) return at
+            date = date.plusDays(1)
+        }
+        return time + 7 * 86_400_000L
+    }
     fun submissionText(data: AppData, target: SelfReadTarget?, time: Long, failed: Boolean = false): String? {
         target ?: return null
         if (!target.eligible || target.submitted) return null

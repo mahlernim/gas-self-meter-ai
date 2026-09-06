@@ -12,22 +12,27 @@ data class Provider(
 ) {
     val skens: Boolean get() = skensCode != null
     val samchully: Boolean get() = id == "samchully"
-    val direct: Boolean get() = id in setOf("daesung", "daesungclean", "haeyang")
+    val direct: Boolean get() = id in DIRECT_IDS
     val passwordConnection: Boolean get() = skens || samchully || direct
-    val energyTalkTenants: List<String> get() = when (id) {
-        "cncity" -> listOf("cncity")
-        "knenergy" -> listOf("kne")
-        "kiturami" -> listOf("ktrm")
-        "seohae" -> listOf("miraense")
-        "seorabeol" -> listOf("srb")
-        "gse" -> listOf("gse")
-        "chambit" -> listOf("cwjgas", "ccbgas", "cydgas", "cdhgas", "cscgas")
-        else -> emptyList()
-    }
-    val energyTalk: Boolean get() = energyTalkTenants.isNotEmpty()
+    val energyTalkTenants: List<String> get() = ENERGY_TALK_TENANTS[id].orEmpty()
+    val energyTalk: Boolean get() = id in ENERGY_TALK_TENANTS
     val websiteLabel: String get() = if (website == "https://www.kogas.or.kr/site/koGas/1020408040000") "공급사 안내" else "공급사 홈페이지"
     val accountRecovery: String get() = if (skens) "https://www.skens.com/$id/login/find.do" else website
     val registration: String get() = if (skens) "https://www.skens.com/$id/join/type.do" else website
+
+    private companion object {
+        // Held as constants so reading these in a recomposition does not rebuild a collection.
+        val DIRECT_IDS = setOf("daesung", "daesungclean", "haeyang")
+        val ENERGY_TALK_TENANTS = mapOf(
+            "cncity" to listOf("cncity"),
+            "knenergy" to listOf("kne"),
+            "kiturami" to listOf("ktrm"),
+            "seohae" to listOf("miraense"),
+            "seorabeol" to listOf("srb"),
+            "gse" to listOf("gse"),
+            "chambit" to listOf("cwjgas", "ccbgas", "cydgas", "cdhgas", "cscgas"),
+        )
+    }
 }
 object Providers {
     // Public company directory checked 2026-09-04. Catalog inclusion is not API verification.
