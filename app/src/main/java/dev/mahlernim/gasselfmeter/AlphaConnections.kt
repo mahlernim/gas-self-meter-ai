@@ -118,7 +118,7 @@ internal object AlphaConnections {
             Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("선택한 공급사의 청구 정보와 자가검침 상태를 추가로 확인할 수 있어요. 조회를 시작할 때 선택한 공급사에만 요청합니다.")
                 Row {
-                    FilterChip(selected = !energyMode, enabled = !busy, onClick = { energyMode = false; result = null; error = null; consent = false }, label = { Text("공급사 추가 조회") })
+                    FilterChip(selected = !energyMode, enabled = !busy, onClick = { energyMode = false; result = null; error = null; consent = false }, label = { Text("고객번호·계정 조회") })
                     Spacer(Modifier.width(8.dp))
                     FilterChip(selected = energyMode, enabled = !busy, onClick = { energyMode = true; identity = ""; password = ""; result = null; error = null; consent = false }, label = { Text("에너지톡") })
                 }
