@@ -111,6 +111,7 @@ object EnergyTalkBridge {
             energyTalkConnection = connection, energyTalkBills = if (bills.isEmpty() && snapshot.unavailable.isNotEmpty()) data.energyTalkBills else bills,
             gasappConnection = null, cachedGasappTarget = null, gasappBills = emptyList(),
             gasappMeterChangeObservedAt = null, samchullyBills = emptyList(),
+            directBills = emptyList(),
             submissionSettings = data.submissionSettings.copy(automatic = false),
         )
     }

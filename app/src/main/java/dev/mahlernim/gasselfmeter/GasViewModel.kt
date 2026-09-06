@@ -19,6 +19,7 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
     var data by mutableStateOf(AppData()); private set
     var message by mutableStateOf<String?>(null)
     var loginError by mutableStateOf<String?>(null); private set
+    var reconnectRequired by mutableStateOf(false); private set
     var busy by mutableStateOf(false); private set
     var progress by mutableStateOf(""); private set
     var progressCurrent by mutableIntStateOf(0); private set
@@ -28,6 +29,7 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
     var selfReadTarget by mutableStateOf<SelfReadTarget?>(null); private set
     private var pendingClient: SkensClient? = null
     private var pendingSamchully: SamchullyLogin? = null
+    private var pendingDirect: DirectLogin? = null
     private var pendingProvider: Provider? = null
     private var pendingCredentials: Credentials? = null
     private var remember = true
@@ -58,6 +60,7 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
             gasappConnection = if (next.gasappConnection == before.gasappConnection) latest.gasappConnection else next.gasappConnection,
             energyTalkConnection = if (next.energyTalkConnection == before.energyTalkConnection) latest.energyTalkConnection else next.energyTalkConnection,
             energyTalkBills = if (next.energyTalkBills == before.energyTalkBills) latest.energyTalkBills else next.energyTalkBills,
+            directBills = if (next.directBills == before.directBills) latest.directBills else next.directBills,
             submissionSettings = if (next.submissionSettings == before.submissionSettings) latest.submissionSettings else next.submissionSettings,
             profile = next.profile.copy(
                 meter = if (next.profile.meter == before.profile.meter) latest.profile.meter else next.profile.meter,
@@ -103,6 +106,7 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
             gasappBills = if (changed) emptyList() else data.gasappBills,
             samchullyBills = if (changed) emptyList() else data.samchullyBills,
             energyTalkBills = if (changed) emptyList() else data.energyTalkBills,
+            directBills = if (changed) emptyList() else data.directBills,
             submissions = if (changed) emptyList() else data.submissions, submissionSettings = SubmissionSettings()))
         scheduleStoredData()
     }
@@ -153,6 +157,10 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
     fun login(providerId: String, username: String, password: String, rememberPassword: Boolean) {
         if (busy) return
         if (username.isBlank() || password.isBlank()) { loginError = "아이디와 비밀번호를 입력해 주세요."; message = loginError; return }
+        if (Providers.get(providerId).direct) {
+            loginDirect(providerId, username, password, rememberPassword)
+            return
+        }
         if (Providers.get(providerId).samchully) {
             loginSamchully(username, password, rememberPassword)
             return
@@ -181,6 +189,22 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
     private suspend fun syncSelected(contract: Contract) {
+        pendingDirect?.let { login ->
+            val providerId = pendingProvider!!.id
+            val selected = login.contracts.singleOrNull { it.id == contract.ca }
+                ?: error("선택한 계약을 찾지 못했어요. 다시 연결해 주세요.")
+            setProgress(2, 4, "청구 이력과 검침 기간을 확인하는 중")
+            val snapshot = withContext(Dispatchers.IO) {
+                SubmissionGate.lock.withLock { DirectProviderBridge.snapshot(login, selected) }
+            }
+            save(DirectProviderBridge.merge(data, snapshot, providerId, if (remember) pendingCredentials else null))
+            selfReadTarget = data.cachedSelfRead
+            scheduleSubmission()
+            scheduleRefresh()
+            message = "${Providers.get(providerId).name} 청구 이력 ${snapshot.bills.size}건을 가져왔어요."
+            clearPending()
+            return
+        }
         pendingSamchully?.let { login ->
             setProgress(2, 4, "삼천리 청구 이력을 조회하는 중")
             val selected = login.contracts.singleOrNull { it.customerNo == contract.ca }
@@ -209,7 +233,7 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
         val periods = (keep + result.periods).sortedBy { it.start }
         Estimator.validatePeriods(periods)
         save(data.copy(profile = data.profile.copy(providerId = provider.id, meter = result.meter, contract = contractKey, customerNumber = contract.ca, plannedDate = result.planned, syncTime = System.currentTimeMillis()),
-            periods = periods, credentials = if (remember) pendingCredentials else null, ready = true, cachedSelfRead = result.selfRead, gasappConnection = null, cachedGasappTarget = null, energyTalkConnection = null, energyTalkBills = emptyList(), samchullyBills = emptyList(), gasappBills = emptyList()))
+            periods = periods, credentials = if (remember) pendingCredentials else null, ready = true, cachedSelfRead = result.selfRead, gasappConnection = null, cachedGasappTarget = null, energyTalkConnection = null, energyTalkBills = emptyList(), samchullyBills = emptyList(), gasappBills = emptyList(), directBills = emptyList()))
         selfReadTarget = result.selfRead
         scheduleSubmission()
         scheduleRefresh()
@@ -241,6 +265,7 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
     }
     fun checkSubmissionStatus() {
         if (busy) return
+        if (Providers.get(data.profile.providerId).direct) { gasappAction("검침 기간과 제출 상태를 확인하는 중") { DirectProviderBridge.checkStatus(getApplication()) }; return }
         if (data.energyTalkConnection != null) { gasappAction("검침 기간과 제출 상태를 확인하는 중") { EnergyTalkBridge.checkStatus(getApplication()) }; return }
         if (Providers.get(data.profile.providerId).samchully) { gasappAction("검침 기간과 제출 상태를 확인하는 중") { SamchullyBridge.checkStatus(getApplication()) }; return }
         if (data.gasappConnection != null) { gasappAction("검침 기간과 제출 상태를 확인하는 중") { GasappBridge.checkStatus(getApplication()) }; return }
@@ -265,6 +290,7 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
     }
     fun submitReading(value: Double) {
         if (busy) return
+        if (Providers.get(data.profile.providerId).direct) { gasappAction("검침값을 제출하고 결과를 확인하는 중") { DirectProviderBridge.submit(getApplication(), value) }; return }
         if (data.energyTalkConnection != null) { gasappAction("검침값을 제출하고 결과를 확인하는 중") { EnergyTalkBridge.submit(getApplication(), value) }; return }
         if (Providers.get(data.profile.providerId).samchully) { gasappAction("검침값을 제출하고 결과를 확인하는 중") { SamchullyBridge.submit(getApplication(), value) }; return }
         if (data.gasappConnection != null) {
@@ -374,6 +400,29 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
     fun cancelLogin() { if (!busy) clearPending() }
+    private fun loginDirect(providerId: String, username: String, password: String, rememberPassword: Boolean) {
+        clearPending()
+        pendingProvider = Providers.get(providerId)
+        pendingCredentials = Credentials(username.trim(), password)
+        remember = rememberPassword
+        busy = true
+        loginError = null
+        setProgress(0, 4, "공급사에 로그인하고 계약을 확인하는 중")
+        viewModelScope.launch {
+            try {
+                pendingDirect = withContext(Dispatchers.IO) {
+                    SubmissionGate.lock.withLock { DirectProviderBridge.login(providerId, pendingCredentials!!) }
+                }
+                contracts = pendingDirect!!.contracts.map { Contract("", it.id, it.label) }
+                setProgress(1, 4, "사용 계약을 선택해 주세요")
+                if (contracts.size == 1) syncSelected(contracts.single())
+            } catch (e: Exception) {
+                loginError = reportError(e, "login")
+                message = loginError
+                clearPending()
+            } finally { busy = false }
+        }
+    }
     private fun loginSamchully(username: String, password: String, rememberPassword: Boolean) {
         clearPending()
         pendingProvider = Providers.get("samchully")
@@ -399,9 +448,11 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
     }
     private suspend fun reportError(e: Exception, stage: String = "sync"): String {
         val provider = pendingProvider?.id ?: data.profile.providerId
+        if (data.ready && (e is GasappAuthExpired || e is ProviderFailure && e.category == "authentication")) reconnectRequired = true
         return readableError(e) + "\n" + withContext(Dispatchers.IO) { Diagnostics.record(getApplication(), provider, stage, e) }
     }
-    private fun clearPending() { pendingClient?.close(); pendingClient = null; pendingSamchully = null; pendingProvider = null; pendingCredentials = null; contracts = emptyList() }
+    private fun clearPending() { pendingClient?.close(); pendingClient = null; pendingSamchully = null; pendingDirect?.close(); pendingDirect = null; pendingProvider = null; pendingCredentials = null; contracts = emptyList() }
+    fun dismissReconnect() { reconnectRequired = false }
     fun restore(raw: String, onResult: (String?) -> Unit = {}) = attempt(onResult) {
         restoreData(withContext(Dispatchers.IO) { DataCodec.decode(raw) })
     }
@@ -440,6 +491,14 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
     override fun onCleared() { clearPending() }
 }
 fun readableError(e: Exception): String = when (e) {
+    is GasappAuthExpired -> "로그인이 만료됐어요. 다시 연결하면 저장한 기록을 이어서 사용할 수 있어요."
+    is ProviderFailure -> when (e.category) {
+        "authentication" -> "아이디와 비밀번호를 확인하고 다시 연결해 주세요. 저장한 기록은 유지돼요."
+        "network", "timeout" -> "인터넷 연결을 확인하고 잠시 후 다시 시도해 주세요."
+        "tls" -> "공급사와 안전하게 연결하지 못했어요. 기기의 날짜와 네트워크를 확인해 주세요."
+        "validation", "provider_mismatch" -> "선택한 계약과 계량기 정보를 다시 확인해 주세요."
+        else -> "공급사 정보를 확인하지 못했어요. 잠시 후 다시 조회하거나 오류 신고에서 문제 상황을 알려 주세요."
+    }
     is java.net.UnknownHostException, is java.net.SocketTimeoutException, is java.net.ConnectException -> "인터넷 연결을 확인하고 잠시 후 다시 시도해 주세요."
     is javax.net.ssl.SSLException -> "공급사와 안전하게 연결하지 못했어요. 기기의 날짜와 네트워크를 확인해 주세요."
     is IllegalArgumentException, is IllegalStateException -> e.message?.takeIf { it.any { ch -> ch in '가'..'힣' } } ?: "입력값이나 데이터 형식을 확인해 주세요."

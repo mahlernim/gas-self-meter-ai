@@ -33,7 +33,7 @@ class ProviderCatalogTest {
         assertEquals("other", Providers.get("unknown-provider").id)
     }
 
-    @Test fun newCatalogEntriesRemainManualAndMatchTheirServiceRegions() {
+    @Test fun catalogEntriesKeepTheirRegionsAndExplicitConnectionCapabilities() {
         val expected = mapOf(
             "daesungclean" to listOf("대구", "경북"), "knenergy" to listOf("경남"),
             "seorabeol" to listOf("경북"), "gse" to listOf("경남"), "myungsung" to listOf("강원"),
@@ -42,10 +42,10 @@ class ProviderCatalogTest {
             val provider = Providers.get(id)
             assertEquals(id, provider.id)
             assertEquals(regions, provider.regions)
-            assertFalse(provider.automatic)
+            assertEquals(id == "daesungclean", provider.automatic)
             assertFalse(provider.automaticSubmission)
             assertFalse(provider.gasapp)
-            assertFalse(provider.passwordConnection)
+            assertEquals(id == "daesungclean", provider.passwordConnection)
             assertNull(provider.skensCode)
         }
         assertEquals(listOf("충북", "세종"), Providers.get("cheongju").regions)
@@ -77,8 +77,8 @@ class ProviderCatalogTest {
             "gunsan", "jeju", "kyungdong", "chambit", "mcenergy", "seohae", "daehwa")
         val skens = setOf("busan", "koone", "cheongju", "gumi", "pohang", "jeonnam", "gangwon", "jeonbuk")
         assertEquals(gasapp, Providers.all.filter { it.gasapp }.map { it.id }.toSet())
-        assertEquals(skens + gasapp + "samchully", Providers.all.filter { it.automatic }.map { it.id }.toSet())
+        assertEquals(skens + gasapp + setOf("samchully", "daesung", "daesungclean", "haeyang"), Providers.all.filter { it.automatic }.map { it.id }.toSet())
         assertEquals(gasapp + "busan", Providers.all.filter { it.automaticSubmission }.map { it.id }.toSet())
-        assertEquals(skens + "samchully", Providers.all.filter { it.passwordConnection }.map { it.id }.toSet())
+        assertEquals(skens + setOf("samchully", "daesung", "daesungclean", "haeyang"), Providers.all.filter { it.passwordConnection }.map { it.id }.toSet())
     }
 }

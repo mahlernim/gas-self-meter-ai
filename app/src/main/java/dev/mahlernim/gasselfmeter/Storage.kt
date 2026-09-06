@@ -23,6 +23,7 @@ object DataCodec {
         GasappCodec.encode(this, data, includeCredentials)
         SamchullyCodec.encode(this, data.samchullyBills)
         EnergyTalkCodec.encode(this, data, includeCredentials)
+        DirectBillCodec.encode(this, data.directBills)
         put("profile", JSONObject().apply {
             put("providerId", data.profile.providerId); put("meter", data.profile.meter)
             put("contract", data.profile.contract); put("plannedDate", data.profile.plannedDate)
@@ -129,7 +130,7 @@ object DataCodec {
         val decoded = AppData(profile, periods, observations, credentials, settings, submissions, json.optBoolean("ready", true), cached,
             GasappCodec.connection(json, allowCredentials), GasappCodec.target(json, allowCredentials), GasappCodec.bills(json),
             if (allowCredentials && !json.isNull("gasappMeterChangeObservedAt")) json.getLong("gasappMeterChangeObservedAt") else null,
-            SamchullyCodec.decode(json), EnergyTalkCodec.connection(json, allowCredentials), EnergyTalkCodec.bills(json))
+            SamchullyCodec.decode(json), EnergyTalkCodec.connection(json, allowCredentials), EnergyTalkCodec.bills(json), DirectBillCodec.decode(json))
         return GasappCodec.withoutLegacyBillPeriods(decoded)
     }
 }

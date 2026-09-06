@@ -28,7 +28,7 @@ import kotlin.coroutines.EmptyCoroutineContext
 internal data class AlphaProbeResult(val lines: List<String>, val feedback: String)
 
 internal object AlphaConnections {
-    val directProviders = listOf("knenergy", "daesung", "daesungclean")
+    val directProviders = listOf("knenergy")
     val energyTenants = linkedMapOf("cncity" to "CNCITY에너지", "kne" to "경남에너지", "ktrm" to "귀뚜라미에너지",
         "miraense" to "미래엔서해에너지", "srb" to "서라벌도시가스", "gse" to "지에스이",
         "cwjgas" to "참빛원주도시가스", "ccbgas" to "참빛충북도시가스", "cydgas" to "참빛영동도시가스",

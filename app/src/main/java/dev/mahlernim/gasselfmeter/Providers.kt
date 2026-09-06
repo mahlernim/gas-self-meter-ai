@@ -12,7 +12,8 @@ data class Provider(
 ) {
     val skens: Boolean get() = skensCode != null
     val samchully: Boolean get() = id == "samchully"
-    val passwordConnection: Boolean get() = skens || samchully
+    val direct: Boolean get() = id in setOf("daesung", "daesungclean", "haeyang")
+    val passwordConnection: Boolean get() = skens || samchully || direct
     val energyTalkTenants: List<String> get() = when (id) {
         "cncity" -> listOf("cncity")
         "knenergy" -> listOf("kne")
@@ -52,12 +53,12 @@ object Providers {
         Provider("jeju", "제주도시가스", listOf("제주"), "https://www.jejucitygas.com/", automatic = true, gasapp = true, automaticSubmission = true),
         Provider("kyungdong", "경동도시가스", listOf("울산", "경남"), "https://www.kdgas.co.kr/", automatic = true, gasapp = true, automaticSubmission = true),
         Provider("cncity", "CNCITY에너지", listOf("대전", "충남"), "https://www.cncityenergy.com/"),
-        Provider("daesung", "대성에너지", listOf("대구", "경북"), "https://www.daesungenergy.com/"),
-        Provider("daesungclean", "대성청정에너지", listOf("대구", "경북"), "https://www.daesungcleanenergy.co.kr/"),
+        Provider("daesung", "대성에너지", listOf("대구", "경북"), "https://www.daesungenergy.com/", automatic = true),
+        Provider("daesungclean", "대성청정에너지", listOf("대구", "경북"), "https://www.daesungcleanenergy.co.kr/", automatic = true),
         Provider("knenergy", "경남에너지", listOf("경남"), "https://www.knenergy.co.kr/"),
         Provider("seorabeol", "서라벌도시가스", listOf("경북"), "https://www.srbgas.co.kr/"),
         Provider("gse", "지에스이", listOf("경남"), "https://www.yesgse.com/"),
-        Provider("haeyang", "해양에너지", listOf("광주", "전남"), "https://www.hyenergy.co.kr/"),
+        Provider("haeyang", "해양에너지", listOf("광주", "전남"), "https://www.hyenergy.co.kr/", automatic = true),
         // Four Chambit companies share this existing Gasapp ID, not a single company website.
         Provider("chambit", "참빛도시가스 계열", listOf("강원", "충북"), directory, automatic = true, gasapp = true, automaticSubmission = true),
         Provider("mcenergy", "MC에너지 (목포도시가스)", listOf("전남"), "https://www.mokpocitygas.co.kr/", automatic = true, gasapp = true, automaticSubmission = true),

@@ -69,6 +69,7 @@ data class AppData(
     val samchullyBills: List<SamchullyBill> = emptyList(),
     val energyTalkConnection: EnergyTalkConnection? = null,
     val energyTalkBills: List<EnergyTalkBill> = emptyList(),
+    val directBills: List<DirectBill> = emptyList(),
 )
 data class Estimate(val reading: Double?, val daily: Double?, val source: String, val ageDays: Long?, val anchorTime: Long?)
 data class SubmissionDecision(val allowed: Boolean, val value: Double?, val reason: String)
@@ -315,6 +316,15 @@ data class MonthlyHistory(
 
 object HistorySummary {
     fun months(data: AppData, latest: YearMonth, count: Int = 24): List<MonthlyHistory> {
+        if (Providers.get(data.profile.providerId).direct) {
+            val bills = data.directBills.groupBy { YearMonth.parse(it.month) }
+            return months(data.periods, latest, count).map { month ->
+                val rows = bills[month.month]
+                val bill = rows?.singleOrNull()
+                month.copy(usage = bill?.usage ?: month.usage,
+                    billedAmount = if (rows != null && rows.size > 1) null else bill?.amount ?: month.billedAmount)
+            }
+        }
         if (data.profile.providerId == "samchully") {
             val bills = data.samchullyBills.associateBy { YearMonth.of(it.billMonth.take(4).toInt(), it.billMonth.takeLast(2).toInt()) }
             return months(data.periods, latest, count).map { month ->
