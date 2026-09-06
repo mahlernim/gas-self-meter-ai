@@ -1,49 +1,37 @@
-# Build and Closed Alpha release
+# Google Play Closed Alpha 릴리스
 
-The next test release uses application ID `dev.mahlernim.gasselfmeter`, version name `0.4.2`, and version code `12`. Supported devices run Android 8.0 or later. The build targets Android 16 / API 36. Distribution is limited to the Google Play Closed Alpha track. Do not attach an APK or AAB to a GitHub release. See [the release scope](ALPHA_0.4.2.md) for changes and verification.
+앱 ID, `versionName`, `versionCode`, 최소 및 대상 API는 릴리스할 소스의 `app/build.gradle.kts`에서 확인합니다. Play에 업로드하는 AAB는 GitHub Release나 다른 공개 다운로드 위치에 올리지 않습니다.
 
-The project uses AGP 9.2.0, its built-in Kotlin support, Kotlin Compose compiler 2.3.10, Gradle 9.4.1, and JDK 21. Dependency versions are explicit in the Gradle build file.
+## 빌드와 서명
 
-## Local build
-
-Set `JAVA_HOME` and `ANDROID_HOME` or an ignored `local.properties` file. Install SDK platform 36 and build tools 36.0.0. On Windows, escape the drive separator in `local.properties`, for example `sdk.dir=C\:/Android/Sdk`.
+JDK와 Android SDK를 준비한 뒤, 릴리스 소스에서 다음 검사를 실행합니다.
 
 ```powershell
 ./gradlew.bat :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
 ./gradlew.bat :app:connectedDebugAndroidTest
-./scripts/build-release.ps1 -SigningDirectory <verified-original-upload-key-directory>
 ```
 
-The release build reads `GAS_SIGNING_STORE` and `GAS_SIGNING_PASSWORD`. Use the `gas-self-meter-ai` keystore alias. Keep the keystore and password outside the repository, back them up privately and never publish either signing secret. The signing key must remain stable so Google Play can accept future updates.
+기존 Play 앱 업데이트에는 이미 등록된 업로드 키와 동일한 인증서가 필요합니다. 서명 파일이 없을 때 새 키를 생성할 수 있는 이전 `scripts/build-release.ps1`의 기본 실행은 기존 앱 업데이트에 사용하지 마세요. 검증된 기존 업로드 키가 있는 디렉터리를 명시해, 인증서 일치를 확인하는 릴리스 절차에서만 사용합니다.
 
-The update script requires an explicit original signing directory, rejects missing files, and verifies the expected upload certificate before building and on the final AAB. It never generates a replacement key. The signing script passes the password through environment variables so it does not appear as a command-line argument. It generates `artifacts/gas-self-meter-ai-0.4.2.aab`. Upload this AAB only to the app's Closed Alpha track in Google Play Console. Do not distribute it from GitHub or another public download page.
+```powershell
+./scripts/build-release.ps1 -SigningDirectory '<verified-signing-directory>'
+```
 
-Before every upload, increment `versionCode`. Update `versionName` when the tester-visible release version should change. Debug signing is not used for Play uploads.
+키 파일과 비밀번호는 저장소 밖의 승인된 보호 저장소에서만 다룹니다. 명령줄, 로그, 문서와 CI 출력에 비밀번호를 남기지 않습니다. debug 키는 Play 업로드에 사용할 수 없습니다.
 
-## Publication checks
+번들을 만든 뒤 다음을 확인합니다.
 
-1. Unit tests and Android lint pass on the release source revision.
-2. The onboarding, calibration, history and persistence workflow passes on Android.
-3. The release AAB builds successfully with the retained signing key.
-4. `jarsigner -verify -verbose -certs app/build/outputs/bundle/release/app-release.aab` passes.
-5. A Play-installed Closed Alpha build opens correctly, with no test account or demo data preloaded.
-6. GitHub Actions verifies the published source revision.
-7. The exact tested AAB is uploaded to the Closed Alpha track.
-8. The release is available to the intended tester group and the Play opt-in link works with a member account.
+1. `jarsigner -verify -verbose -certs app/build/outputs/bundle/release/app-release.aab`가 통과합니다.
+2. `keytool -printcert -jarfile app/build/outputs/bundle/release/app-release.aab`의 업로드 인증서가 기존 Play 앱의 업로드 인증서와 일치합니다.
+3. 최종 AAB의 SHA-256, 패키지, `versionName`, `versionCode`, 소스 revision을 기록하고 그 파일만 업로드합니다.
 
-GitHub Actions runs unit tests, Android lint and a debug build, then retains only the test and lint reports. It does not upload a downloadable APK. The Closed Alpha AAB is signed on the release host, and signing secrets are not present in the repository or CI logs.
+`jarsigner` 검사는 파일의 서명 무결성을 확인하지만 업로드 키의 연속성을 대신 확인하지는 않습니다.
 
-## Closed Alpha publication
+## Closed Alpha 게시
 
-1. Open Google Play Console with the `mahlerlabdiy` developer account and select the app with package ID `dev.mahlernim.gasselfmeter`.
-2. Open the Closed Alpha testing track and create a new release.
-3. Upload `app-release.aab` and add concise tester-facing release notes.
-4. Confirm that the Google Group `gas-self-meter-ai@googlegroups.com` is assigned to the track.
-5. Review the release, start the rollout to Closed Alpha and wait until Play reports it as available to selected testers.
-6. Verify the [tester group](https://groups.google.com/g/gas-self-meter-ai) and [Play opt-in page](https://play.google.com/apps/testing/dev.mahlernim.gasselfmeter) with the same Google account.
+1. Google Play Console에서 `dev.mahlernim.gasselfmeter` 앱의 Closed Alpha 트랙을 엽니다.
+2. 검증한 AAB를 새 릴리스에 추가하고 이용자에게 필요한 변경 사항을 작성합니다.
+3. 지정한 테스터 그룹을 선택하고 검토 후 rollout을 시작합니다.
+4. Play가 선택한 테스터에게 이용 가능하다고 표시한 뒤, 그룹 구성원 계정으로 opt-in 경로를 확인합니다.
 
-Group membership alone does not opt a user into the test. Each tester must open the Play opt-in page and complete registration with the Google account that joined the group.
-
-## Authorized live testing
-
-Normal CI and instrumentation tests use only synthetic data. The research Python probe prompts for authorized credentials using hidden input. No credential is committed, passed as a process argument, or written to its output. Before treating submission as production-verified, use an authorized account during its actual reading window to verify one exact value. Confirm the contract, meter, period and value immediately before the single request. Never exercise automatic submission for this first live check, and never retry an uncertain response without reconciling the provider state. Closed Alpha testers must be told that submission remains unverified and is off by default.
+그룹 구성원은 Play opt-in 절차도 완료해야 테스트 릴리스를 설치할 수 있습니다.
