@@ -104,7 +104,14 @@ fun GasappConnectScreen(
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword))
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf("1" to "SKT", "2" to "KT", "3" to "LG U+").forEach { (code, label) ->
+                    listOf(
+                        "1" to "SKT",
+                        "2" to "KT",
+                        "3" to "LG U+",
+                        "5" to "SKT 알뜰폰",
+                        "6" to "KT 알뜰폰",
+                        "7" to "LG U+ 알뜰폰",
+                    ).forEach { (code, label) ->
                         FilterChip(selected = carrier == code, onClick = { carrier = code; terms = emptyList(); accepted = false },
                             enabled = !busy, label = { Text(label) })
                     }

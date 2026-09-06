@@ -1,6 +1,10 @@
 package dev.mahlernim.gasselfmeter
 
 import org.json.JSONObject
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.Protocol
+import okhttp3.Response
+import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
@@ -107,5 +111,38 @@ class SamchullyClientTest {
         assertEquals(120.0, state.previousReading!!, .00001)
         assertTrue(state.submitted == true)
         assertEquals(132.0, state.submittedReading!!, .00001)
+    }
+
+    @Test fun submissionUsesOnlyAllowlistedOneShotRequests() {
+        val requests = mutableListOf<okhttp3.Request>()
+        val http = readOnlyHttpClient().newBuilder().addInterceptor { chain ->
+            requests += chain.request()
+            Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("synthetic")
+                .body("{\"E_RETCD\":\"S\"}".toResponseBody("application/json".toMediaType())).build()
+        }.build()
+        SamchullyReadClient(Providers.get("samchully"), null, http).use { client ->
+            client.validateAndSubmit(SamchullyContract("0012345678", "합성", null, null, null, null), "target", 123.0)
+        }
+        assertEquals(3, requests.size)
+        assertTrue(requests.all { it.body!!.isOneShot() })
+        assertTrue(requests.all { it.header("X-User-Token") == null })
+        assertTrue(requests.all { it.url.toString().contains("scl/services/") })
+    }
+
+    @Test fun submissionExpiryIsReportedAtSubmitStageWithoutRetry() {
+        var calls = 0
+        val http = readOnlyHttpClient().newBuilder().addInterceptor { chain ->
+            calls++
+            Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(401).message("synthetic")
+                .body("{}".toResponseBody("application/json".toMediaType())).build()
+        }.build()
+        SamchullyReadClient(Providers.get("samchully"), null, http).use { client ->
+            val failure = assertThrows(ProviderFailure::class.java) {
+                client.validateAndSubmit(SamchullyContract("0012345678", "합성", null, null, null, null), "target", 123.0)
+            }
+            assertEquals("submit", failure.stage)
+            assertEquals("authentication", failure.category)
+        }
+        assertEquals(1, calls)
     }
 }

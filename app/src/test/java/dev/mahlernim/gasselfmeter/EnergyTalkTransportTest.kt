@@ -105,6 +105,36 @@ class EnergyTalkTransportTest {
         assertEquals(1, snapshot.unavailable.size)
         assertNotNull(snapshot.meter)
     }
+    @Test fun preflightAndSubmissionUseOneCheckedFormRequest() = runBlocking {
+        val requests = CopyOnWriteArrayList<String>()
+        val base = OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            val body = Buffer().also { requireNotNull(request.body).writeTo(it) }.readUtf8()
+            val key = if (request.url.encodedPath == "/api/formdata") {
+                assertEquals("POST", request.method)
+                assertTrue(body.contains("name=\"method\""))
+                assertTrue(body.contains("name=\"url\""))
+                assertTrue(body.contains("/gas/api/self-meter"))
+                assertTrue(body.contains("101"))
+                "form"
+            } else {
+                val envelope = JSONObject(body)
+                envelope.getString("method") + ":" + envelope.getString("url")
+            }
+            requests += key
+            val responseBody = when (key) {
+                "GET:/gas/api/user/info" -> user
+                "POST:/gas/api/self-meter/check" -> """{"responseCode":"ok","addableYn":"Y","notificationMsg":"합성 통과"}"""
+                "form" -> """{"responseCode":"ok"}"""
+                else -> error("unexpected request $key")
+            }
+            response(request, responseBody)
+        }.build()
+        val client = EnergyTalkReadClient(base)
+        assertTrue(client.checkReading(token, "srb", 101.0).allowed)
+        client.submitReading(token, "srb", 101.0)
+        assertEquals(listOf("GET:/gas/api/user/info", "POST:/gas/api/self-meter/check", "GET:/gas/api/user/info", "form"), requests)
+    }
     @Test fun cancellationCancelsInFlightCallAndDoesNotStartAnotherRequest() = runBlocking {
         val started = CountDownLatch(1)
         val release = CountDownLatch(1)

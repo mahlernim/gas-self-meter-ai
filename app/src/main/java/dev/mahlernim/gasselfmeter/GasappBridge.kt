@@ -53,7 +53,9 @@ object GasappBridge {
         return data.copy(profile = data.profile.copy(providerId = providerId, contract = connection.account.key,
             customerNumber = connection.account.customer.ifBlank { connection.account.contract }, meter = meter,
             plannedDate = target.end, syncTime = now), periods = periods, ready = true, credentials = null,
-            cachedSelfRead = null, gasappConnection = connection, cachedGasappTarget = target, gasappBills = bills, gasappMeterChangeObservedAt = replacementObservedAt(data, target, now))
+            cachedSelfRead = null, gasappConnection = connection, cachedGasappTarget = target, gasappBills = bills,
+            energyTalkConnection = null, energyTalkBills = emptyList(),
+            gasappMeterChangeObservedAt = replacementObservedAt(data, target, now))
     }
 
     fun replacementObservedAt(data: AppData, target: GasappTarget, now: Long): Long? {
@@ -178,10 +180,17 @@ object GasappSubmissionPolicy {
             return deny("교체된 계량기의 실제 숫자를 다시 확인해 주세요.")
         val age = ((time - observation.time) / 86_400_000L).coerceAtLeast(0)
         if (automatic && data.submissionSettings.requireRecentCheck && age > data.submissionSettings.recentDays) return deny("보정한 지 오래됐어요. 실제 숫자를 다시 확인해 주세요.")
-        val estimate = Estimator.estimate(data, time).reading ?: return deny("제출할 지침을 계산할 수 없어요.")
-        val value = floor(estimate)
+        val estimate = Estimator.estimate(data, time).reading
+        val directObservation = data.observations.lastOrNull { it.meter == data.profile.meter && it.time <= time }
+            ?.takeIf { !automatic && dateOf(it.time) == dateOf(time) }
+        val value = when {
+            directObservation != null -> floor(directObservation.reading)
+            estimate != null -> floor(estimate)
+            else -> return deny("오늘 확인한 계량기 숫자 또는 사용량 추정이 필요해요.")
+        }
         if (target.previous == null || !value.isFinite() || value < target.previous || value > 99_999_999) return deny("이전 지침과 제출값을 확인해 주세요.")
         if (target.digits != null && value.toLong().toString().length > target.digits) return deny("계량기 자릿수를 확인해 주세요.")
-        return SubmissionDecision(true, value, "검침 기간과 기존 제출 여부를 확인했어요.")
+        val reason = if (directObservation != null) "오늘 확인한 계량기 숫자로 제출값을 정했어요." else "검침 기간과 기존 제출 여부를 확인했어요."
+        return SubmissionDecision(true, value, reason)
     }
 }

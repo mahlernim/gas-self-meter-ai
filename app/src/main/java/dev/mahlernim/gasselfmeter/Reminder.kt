@@ -42,7 +42,7 @@ object Reminders {
 object SubmissionScheduler {
     const val CHANNEL = "meter-submission"
     fun schedule(context: Context, data: AppData) {
-        val connected = data.ready && ((data.credentials != null && Providers.get(data.profile.providerId).skens) || data.gasappConnection != null)
+        val connected = data.ready && ((data.credentials != null && Providers.get(data.profile.providerId).passwordConnection) || data.gasappConnection != null || data.energyTalkConnection != null)
         WorkManager.getInstance(context).cancelUniqueWork("meter-auto-submit-now")
         daily<SubmissionWorker>(context, "meter-auto-submit", connected && data.submissionSettings.automatic &&
             Providers.get(data.profile.providerId).automaticSubmission, 10, network = true)
@@ -143,6 +143,16 @@ class SubmissionReminderWorker(context: Context, params: WorkerParameters) : Wor
             var data = store.read()
             if (!data.submissionSettings.reminder) return Result.success()
             if (data.gasappConnection != null) return GasappBackground.remind(applicationContext)
+            if (data.energyTalkConnection != null || Providers.get(data.profile.providerId).samchully) {
+                val expected = data
+                data = if (data.energyTalkConnection != null) EnergyTalkBridge.checkStatus(applicationContext)
+                    else SamchullyBridge.checkStatus(applicationContext)
+                if (!BackgroundState.sameAccount(data, expected) || !data.submissionSettings.reminder) return Result.success()
+                val text = ReminderPolicy.submissionText(data, data.cachedSelfRead, System.currentTimeMillis())
+                if (text != null) notify(applicationContext, 3, SubmissionScheduler.CHANNEL, "자가검침 제출 안내", "똑똑 자가검침 AI", text)
+                else applicationContext.getSystemService(NotificationManager::class.java).cancel(3)
+                return Result.success()
+            }
             val expected = data
             val credentials = data.credentials ?: return Result.success()
             val provider = Providers.skens(data.profile.providerId)
@@ -174,5 +184,4 @@ class ReminderWorker(context: Context, params: WorkerParameters) : Worker(contex
         return Result.success()
     }
 }
-
 

@@ -11,8 +11,19 @@ data class Provider(
     val automaticSubmission: Boolean = false,
 ) {
     val skens: Boolean get() = skensCode != null
-    val experimentalReadOnly: Boolean get() = id == "samchully"
-    val passwordConnection: Boolean get() = skens || experimentalReadOnly
+    val samchully: Boolean get() = id == "samchully"
+    val passwordConnection: Boolean get() = skens || samchully
+    val energyTalkTenants: List<String> get() = when (id) {
+        "cncity" -> listOf("cncity")
+        "knenergy" -> listOf("kne")
+        "kiturami" -> listOf("ktrm")
+        "seohae" -> listOf("miraense")
+        "seorabeol" -> listOf("srb")
+        "gse" -> listOf("gse")
+        "chambit" -> listOf("cwjgas", "ccbgas", "cydgas", "cdhgas", "cscgas")
+        else -> emptyList()
+    }
+    val energyTalk: Boolean get() = energyTalkTenants.isNotEmpty()
     val websiteLabel: String get() = if (website == "https://www.kogas.or.kr/site/koGas/1020408040000") "공급사 안내" else "공급사 홈페이지"
     val accountRecovery: String get() = if (skens) "https://www.skens.com/$id/login/find.do" else website
     val registration: String get() = if (skens) "https://www.skens.com/$id/join/type.do" else website

@@ -209,9 +209,10 @@ class MainActivity : ComponentActivity() {
                     else vm.setReminder(true, data.profile.reminderDay, data.profile.reminderHour)
                 }, { vm.setReminder(false, data.profile.reminderDay, data.profile.reminderHour) },
                     { day, hour -> vm.setReminder(data.profile.reminder, day, hour) }, vm::setReminderRepeatCount,
-                    { loginProviderId = data.profile.providerId }, { vm.forgetCredentials() },
+                    { loginProviderId = if (data.energyTalkConnection != null || data.cachedSelfRead?.contract?.bp?.startsWith("energytalk:") == true) "energytalk:${data.profile.providerId}" else data.profile.providerId }, { vm.forgetCredentials() },
                     { export.launch("gas-self-meter-${today()}.json") }, { importer.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) },
-                    { confirmation = "meter" }, { confirmation = "erase" }, ::openUpdate, { licenses = true }, ::open, vm.busy, { diagnostics = true })
+                    { confirmation = "meter" }, { confirmation = "erase" }, ::openUpdate, { licenses = true }, ::open, vm.busy, { diagnostics = true },
+                    { loginProviderId = "energytalk:${data.profile.providerId}" })
             }
         }
     }
@@ -225,10 +226,10 @@ class MainActivity : ComponentActivity() {
     } }
     submitValue?.let { value ->
         val provider = Providers.get(data.profile.providerId)
-        val valueText = decimalText(value, if (provider.gasapp) 0 else 1)
+        val valueText = decimalText(value, if (provider.gasapp || provider.samchully || data.energyTalkConnection != null) 0 else 1)
         AlertDialog(onDismissRequest = { submitValue = null }, title = { Text("검침값을 공급사에 입력할까요?") },
             text = { Text("${provider.name}에 $valueText m³를 입력합니다." +
-                (if (provider.gasapp) "\n\n가스앱은 소수점 아래를 제외한 정수 지침을 제출해요." else "") +
+                (if (provider.gasapp || provider.samchully || data.energyTalkConnection != null) "\n\n소수점 아래를 제외한 정수 지침을 제출해요." else "") +
                 "\n\n전송 직전에 기간과 기존 제출 여부를 다시 확인하며, 결과가 불확실하면 자동으로 다시 보내지 않습니다.") },
             confirmButton = { TextButton(onClick = { vm.submitReading(value); submitValue = null }) { Text("$valueText m³ 입력") } },
             dismissButton = { TextButton(onClick = { submitValue = null }) { Text("취소") } })
@@ -237,7 +238,13 @@ class MainActivity : ComponentActivity() {
         vm.addPeriod(start, end, value) { error -> result(error); if (error == null) addHistory = false }
     }
     loginProviderId?.let { providerId ->
-        if (Providers.get(providerId).gasapp) {
+        val connectionProvider = Providers.get(providerId.removePrefix("energytalk:"))
+        if (providerId.startsWith("energytalk:") || (connectionProvider.energyTalk && !connectionProvider.automatic)) {
+            EnergyTalkProviderDialog(connectionProvider, { loginProviderId = null }) { connection, snapshot ->
+                loginProviderId = null
+                vm.connectEnergyTalk(connection, snapshot)
+            }
+        } else if (connectionProvider.gasapp) {
             Dialog(onDismissRequest = {}, properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false, usePlatformDefaultWidth = false)) {
                 Surface(Modifier.fillMaxWidth().padding(16.dp).heightIn(max = 640.dp), shape = RoundedCornerShape(24.dp), color = Paper) {
                     GasappConnectScreen(providerId, { session, account ->
@@ -397,13 +404,13 @@ class MainActivity : ComponentActivity() {
             Choice("도시가스 공급사", provider?.name ?: "공급사를 선택해 주세요", providers.map { it.name }) { name -> providerId = providers.first { it.name == name }.id }
             if (provider == null) {
                 Text("청구서에 적힌 공급사를 선택해 주세요. 같은 지역에서도 주소에 따라 공급사가 달라요.", color = Muted)
-            } else if (provider.automatic) {
-                if (provider.experimentalReadOnly) Text("실험적 조회 연결 · 아직 계정별 검증 중이며 검침 제출은 지원하지 않아요.", color = Muted, style = MaterialTheme.typography.bodySmall)
-                Hint(Icons.Outlined.CloudDownload, if (provider.gasapp) "가스앱 본인인증으로 ${provider.name} 사용 계약과 청구 이력을 가져와요." else "${provider.name} 계정으로 청구 이력을 가져올 수 있어요.")
+            } else if (provider.automatic || provider.energyTalk) {
+                Hint(Icons.Outlined.CloudDownload, if (provider.gasapp) "가스앱 본인인증으로 ${provider.name} 사용 계약과 청구 이력을 가져와요." else if (provider.energyTalk) "에너지톡 공식 로그인으로 주소를 선택하고 청구 이력을 가져와요." else "${provider.name} 계정으로 청구 이력을 가져올 수 있어요.")
                 ActionButton("${provider.name} 연결하기", Icons.Outlined.Login, !busy) { onLogin(providerId) }
+                if (provider.gasapp && provider.energyTalk) TextButton(onClick = { onLogin("energytalk:$providerId") }, enabled = !busy) { Text("에너지톡으로 연결") }
                 TextButton(onClick = { onManual(providerId) }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("로그인 없이 직접 시작") }
             } else {
-                Hint(Icons.Outlined.EditNote, "이 공급사는 직접 입력으로 시작할 수 있어요. 자동 계정 연결은 아직 지원하지 않아요.")
+                Hint(Icons.Outlined.EditNote, "청구서의 사용량과 계량기 숫자를 기록하면 추정과 알림을 이용할 수 있어요.")
                 if (provider.gasapp) Text("가스앱에서 확인한 과거 사용량을 입력할 수 있어요.", style = MaterialTheme.typography.bodySmall, color = Muted)
                 ActionButton("직접 입력으로 시작", Icons.Outlined.ArrowForward, !busy) { onManual(providerId) }
                 TextButton(onClick = { open(provider.website) }) { Text("${provider.websiteLabel}에서 확인") }
@@ -411,7 +418,7 @@ class MainActivity : ComponentActivity() {
         }
         Hint(Icons.Outlined.Lock, "로그인 정보와 사용 기록은 기기에 암호화해 보관해요. 별도 서버나 광고·분석 도구를 사용하지 않아요.")
         TextButton(onClick = diagnostics) { Text("진단 기록") }
-        TextButton(onClick = { alphaLab = true }, enabled = !busy) { Text("알파 연결 실험실") }
+        TextButton(onClick = { alphaLab = true }, enabled = !busy) { Text("공급사 추가 조회") }
         Text("계량기 보고 보정하기는 실측값을 저장해요. 공급사 제출은 제출 탭에서 진행해요.", color = Muted, style = MaterialTheme.typography.bodySmall)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
             TextButton(onClick = onDemo, enabled = !busy) { Text("예시로 둘러보기") }
@@ -537,22 +544,12 @@ class MainActivity : ComponentActivity() {
 @Composable private fun SubmissionPage(data: AppData, target: SelfReadTarget?, now: Long, estimate: Estimate, busy: Boolean,
     refresh: () -> Unit, submit: (Double) -> Unit,
     changeSettings: (SubmissionSettings) -> Unit) {
+    val submissionDigits = if (data.gasappConnection != null || data.energyTalkConnection != null || data.profile.providerId == "samchully") 0 else 1
     val settings = data.submissionSettings
     val provider = Providers.get(data.profile.providerId)
-    if (provider.experimentalReadOnly) {
-        val context = LocalContext.current
-        Page {
-            Title("삼천리 조회 전용", "알파테스트 중인 연결입니다. 청구 이력 조회만 지원해요.")
-            Text("검침값 제출과 제출 알림은 아직 제공하지 않습니다. 공식 고객센터를 이용해 주세요.")
-            ActionButton("삼천리 고객센터", Icons.Outlined.OpenInNew) {
-                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(provider.website)))
-            }
-        }
-        return
-    }
     val demo = data.profile.meter == "demo"
-    val supported = provider.skens || provider.gasapp
-    val connected = if (provider.gasapp) data.gasappConnection != null else data.credentials != null
+    val supported = provider.passwordConnection || provider.gasapp || provider.energyTalk
+    val connected = data.energyTalkConnection != null || (if (provider.gasapp) data.gasappConnection != null else data.credentials != null)
     if (!demo && (!supported || !connected)) {
         val context = LocalContext.current
         Page {
@@ -565,16 +562,19 @@ class MainActivity : ComponentActivity() {
         }
         return
     }
+    val useGasapp = data.gasappConnection != null
     val gasappTarget = data.cachedGasappTarget
     val decision = remember(data, target, gasappTarget, now) {
-        if (provider.gasapp) GasappSubmissionPolicy.decide(data, gasappTarget, now, automatic = false)
+        if (data.energyTalkConnection != null) EnergyTalkSubmissionPolicy.decide(data, target, now, automatic = false)
+        else if (provider.samchully) SamchullySubmissionPolicy.decide(data, target, now, automatic = false)
+        else if (provider.gasapp) GasappSubmissionPolicy.decide(data, gasappTarget, now, automatic = false)
         else SubmissionPolicy.decide(data, target, now, automatic = false)
     }
-    val hasTarget = if (provider.gasapp) gasappTarget != null else target != null
-    val periodStart = if (provider.gasapp) gasappTarget?.start else target?.start
-    val periodEnd = if (provider.gasapp) gasappTarget?.end else target?.end
-    val submitted = if (provider.gasapp) gasappTarget?.submitted == true else target?.submitted == true
-    val submittedValue = if (provider.gasapp) gasappTarget?.submittedValue else target?.submittedValue
+    val hasTarget = if (useGasapp) gasappTarget != null else target != null
+    val periodStart = if (useGasapp) gasappTarget?.start else target?.start
+    val periodEnd = if (useGasapp) gasappTarget?.end else target?.end
+    val submitted = if (useGasapp) gasappTarget?.submitted == true else target?.submitted == true
+    val submittedValue = if (useGasapp) gasappTarget?.submittedValue else target?.submittedValue
     val demoDate = dateOf(now)
     val demoValue = if (demo) estimate.reading?.let { kotlin.math.round(it * 10.0) / 10.0 } else null
     Page {
@@ -585,27 +585,27 @@ class MainActivity : ComponentActivity() {
             if (demo) {
                 val month = YearMonth.from(demoDate)
                 Text("${month.atDay(20)} ~ ${month.atDay(25)}", color = Muted, style = MaterialTheme.typography.bodySmall)
-                Text(demoValue?.let { "입력 예정 ${decimalText(it)} m³" } ?: "입력할 숫자를 계산하는 중", fontSize = 28.sp, fontWeight = FontWeight.Bold)
+                Text(demoValue?.let { "입력 예정 ${decimalText(it, submissionDigits)} m³" } ?: "입력할 숫자를 계산하는 중", fontSize = 28.sp, fontWeight = FontWeight.Bold)
                 Text("최근 실측 7일 전 · 기존 제출 없음", color = Muted, style = MaterialTheme.typography.bodySmall)
-                ActionButton(demoValue?.let { "${decimalText(it)} m³ 직접 제출" } ?: "직접 제출", Icons.Outlined.CloudUpload, false) {}
+                ActionButton(demoValue?.let { "${decimalText(it, submissionDigits)} m³ 직접 제출" } ?: "직접 제출", Icons.Outlined.CloudUpload, false) {}
             } else if (!hasTarget) {
                 Text("공급사에서 검침 기간을 확인해 주세요.", color = Muted)
             } else {
                 if (periodStart != null && periodEnd != null) Text("$periodStart ~ $periodEnd", color = Muted, style = MaterialTheme.typography.bodySmall)
                 when {
-                    submitted -> Text(submittedValue?.let { "입력 완료 · ${decimalText(it)} m³" } ?: "입력 완료", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Teal)
-                    decision.value != null -> Text("입력 예정 ${decimalText(decision.value)} m³", fontSize = 28.sp, fontWeight = FontWeight.Bold)
+                    submitted -> Text(submittedValue?.let { "입력 완료 · ${decimalText(it, submissionDigits)} m³" } ?: "입력 완료", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Teal)
+                    decision.value != null -> Text("입력 예정 ${decimalText(decision.value, submissionDigits)} m³", fontSize = 28.sp, fontWeight = FontWeight.Bold)
                     else -> Text("아직 입력할 수 없어요", fontSize = 23.sp, fontWeight = FontWeight.Bold)
                 }
             }
             if (!demo) {
                 Text(decision.reason, color = Muted, style = MaterialTheme.typography.bodySmall)
                 ActionButton("검침 기간과 제출 상태 새로 확인", Icons.Outlined.Refresh, !busy, refresh)
-                if (decision.allowed && decision.value != null) ActionButton("${decimalText(decision.value)} m³ 직접 제출", Icons.Outlined.CloudUpload, !busy) { submit(decision.value) }
+                if (decision.allowed && decision.value != null) ActionButton("${decimalText(decision.value, submissionDigits)} m³ 직접 제출", Icons.Outlined.CloudUpload, !busy) { submit(decision.value) }
             }
         }
         SettingsSection("자가검침 자동제출") {
-            if (provider.automaticSubmission) {
+            if (provider.automaticSubmission && data.energyTalkConnection == null) {
                 SettingToggle("자가검침 자동제출", "기간내 제출을 깜빡하면 AI가 자동으로 대신 제출해요.", Icons.Outlined.AutoAwesome,
                     settings.automatic) { changeSettings(settings.copy(automatic = it)) }
                 SettingToggle("최근 실측이 있을 때만", "보정한지 오래된 경우 자동제출하지 않아요.", Icons.Outlined.FactCheck,
@@ -613,7 +613,7 @@ class MainActivity : ComponentActivity() {
                 if (settings.requireRecentCheck) SettingChoice("허용 기간", "${settings.recentDays}일 이내", Icons.Outlined.DateRange, (1..30).map { "${it}일 이내" }) {
                     changeSettings(settings.copy(recentDays = it.substringBefore("일").toInt()))
                 }
-                if (settings.automatic && data.credentials == null && data.gasappConnection == null && !demo) Text("자동 제출을 사용하려면 설정에서 로그인 정보를 저장해 주세요.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                if (settings.automatic && data.credentials == null && data.gasappConnection == null && data.energyTalkConnection == null && !demo) Text("자동 제출을 사용하려면 설정에서 로그인 정보를 저장해 주세요.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
             } else Text("이 공급사는 직접 제출만 지원해요.", color = Muted, modifier = Modifier.padding(12.dp))
         }
         SettingsSection("제출 알림") {
@@ -643,7 +643,7 @@ class MainActivity : ComponentActivity() {
 
 @Composable private fun HistoryPage(data: AppData, add: () -> Unit, delete: (UsagePeriod) -> Unit, deleteObservation: (Observation) -> Unit) {
     val historyMonth = YearMonth.from(today())
-    val months = remember(data.periods, data.gasappBills, data.samchullyBills, data.profile.providerId, historyMonth) { HistorySummary.months(data, historyMonth).dropWhile { it.usage == null && it.billedAmount == null }.dropLastWhile { it.usage == null && it.billedAmount == null } }
+    val months = remember(data.periods, data.gasappBills, data.samchullyBills, data.energyTalkBills, data.profile.providerId, historyMonth) { HistorySummary.months(data, historyMonth).dropWhile { it.usage == null && it.billedAmount == null }.dropLastWhile { it.usage == null && it.billedAmount == null } }
     var selectedMonth by rememberSaveable { mutableStateOf<String?>(null) }
     val selected = months.find { it.month.toString() == selectedMonth }
     val chartScroll = rememberScrollState(Int.MAX_VALUE)
@@ -685,7 +685,7 @@ class MainActivity : ComponentActivity() {
         }
         ActionButton("과거 사용량 추가", Icons.Outlined.Add, onClick = add)
         Hint(Icons.Outlined.Lightbulb, "작년 같은 달과 앞뒤 달의 이력이 있으면 좋아요. 청구월보다 실제 사용 기간을 정확히 입력해 주세요.")
-        if (data.periods.isEmpty() && data.gasappBills.isEmpty()) EmptyNote("아직 사용 이력이 없어요", "공급사 홈페이지나 청구서에서 과거 사용량을 확인해 입력해 주세요.")
+        if (data.periods.isEmpty() && data.gasappBills.isEmpty() && data.samchullyBills.isEmpty() && data.energyTalkBills.isEmpty()) EmptyNote("아직 사용 이력이 없어요", "공급사 홈페이지나 청구서에서 과거 사용량을 확인해 입력해 주세요.")
         if (data.gasappBills.isNotEmpty()) Text("공급사 청구 사용량은 참고용이에요. 계량기 지침 추정에는 확인된 지침 차이와 직접 확인한 숫자를 사용해요.", style = MaterialTheme.typography.bodySmall, color = Muted)
         val repeatedBillMonths = data.gasappBills.groupingBy { it.month }.eachCount().filterValues { it > 1 }.keys
         if (repeatedBillMonths.isNotEmpty()) Text("같은 달의 청구가 여러 건 있어 모두 표시해요. 합계는 공급사 고지서에서 확인해 주세요.", style = MaterialTheme.typography.bodySmall, color = Muted)
@@ -697,6 +697,22 @@ class MainActivity : ComponentActivity() {
                     bill.amount?.let { Text("${decimalText(it, 0)}원", style = MaterialTheme.typography.bodyMedium) }
                 }
                 if (bill.start != null && bill.end != null) Text("${bill.start} ~ ${bill.end}", color = Muted, style = MaterialTheme.typography.bodySmall)
+            }
+            HorizontalDivider(color = Pale)
+        }
+        data.samchullyBills.sortedByDescending { it.billMonth }.forEach { bill ->
+            Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                Text("${bill.billMonth.take(4)}.${bill.billMonth.takeLast(2)} 청구", color = Muted)
+                bill.amount?.let { Text("${decimalText(it, 0)}원", fontWeight = FontWeight.Bold) }
+                bill.reportedUsage?.let { Text("청구 사용량 ${decimalText(it)}") }
+            }
+            HorizontalDivider(color = Pale)
+        }
+        data.energyTalkBills.sortedByDescending { it.month }.forEach { bill ->
+            Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                Text("${bill.month.take(4)}.${bill.month.takeLast(2)} 청구", color = Muted)
+                Text("사용량 ${bill.usage}")
+                Text("청구금액 ${bill.amount}", fontWeight = FontWeight.Bold)
             }
             HorizontalDivider(color = Pale)
         }
@@ -736,7 +752,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable private fun SettingsPage(data: AppData, enable: () -> Unit, disable: () -> Unit, setTime: (Int, Int) -> Unit, setRepeatCount: (Int) -> Unit,
-    login: () -> Unit, forget: () -> Unit, export: () -> Unit, restore: () -> Unit, meter: () -> Unit, erase: () -> Unit, update: () -> Unit, licenses: () -> Unit, open: (String) -> Unit, busy: Boolean, diagnostics: () -> Unit) {
+    login: () -> Unit, forget: () -> Unit, export: () -> Unit, restore: () -> Unit, meter: () -> Unit, erase: () -> Unit, update: () -> Unit, licenses: () -> Unit, open: (String) -> Unit, busy: Boolean, diagnostics: () -> Unit, energyLogin: () -> Unit) {
     var alphaLab by remember { mutableStateOf(false) }
     if (alphaLab) AlphaConnectionsDialog(data.profile.providerId, onDismiss = { alphaLab = false })
     val provider = Providers.get(data.profile.providerId)
@@ -753,11 +769,11 @@ class MainActivity : ComponentActivity() {
             Text("한국 시간 기준이며 기기 상태에 따라 알림이 늦어질 수 있어요.", modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp), color = Muted, style = MaterialTheme.typography.bodySmall)
         }
         SettingsSection("공급사") {
-            SettingInfo(provider.name, if (data.credentials == null && data.gasappConnection == null) "저장된 로그인 정보 없음" else "연결 정보가 이 기기에 암호화되어 있어요", Icons.Outlined.Apartment)
-            if ((provider.passwordConnection || provider.gasapp) && data.profile.meter != "demo") SettingAction("다시 연결", Icons.Outlined.Login, login, "${provider.name} 계정과 계약을 다시 확인해요", !busy)
-            if (provider.experimentalReadOnly) Text("실험적 조회 연결 · 검침 제출 미지원", Modifier.padding(12.dp), color = Muted)
+            SettingInfo(provider.name, if (data.credentials == null && data.gasappConnection == null && data.energyTalkConnection == null) "저장된 로그인 정보 없음" else "연결 정보가 이 기기에 암호화되어 있어요", Icons.Outlined.Apartment)
+            if ((provider.passwordConnection || provider.gasapp || provider.energyTalk) && data.profile.meter != "demo") SettingAction("다시 연결", Icons.Outlined.Login, login, "${provider.name} 계정과 계약을 다시 확인해요", !busy)
+            if (provider.gasapp && provider.energyTalk && data.profile.meter != "demo") SettingAction("에너지톡으로 연결", Icons.Outlined.Login, energyLogin, "공식 로그인으로 주소를 연결해요", !busy)
             SettingAction(provider.websiteLabel, Icons.Outlined.OpenInNew, { open(provider.website) }, provider.name)
-            if (data.credentials != null || data.gasappConnection != null) SettingAction("로그인 정보 삭제", Icons.Outlined.NoAccounts, forget, "사용 기록은 그대로 유지해요", !busy)
+            if (data.credentials != null || data.gasappConnection != null || data.energyTalkConnection != null) SettingAction("로그인 정보 삭제", Icons.Outlined.NoAccounts, forget, "사용 기록은 그대로 유지해요", !busy)
         }
         SettingsSection("내 기록") {
             SettingAction("기록 내보내기", Icons.Outlined.FileUpload, export, "로그인 정보를 제외한 백업 파일을 만들어요")
@@ -766,7 +782,7 @@ class MainActivity : ComponentActivity() {
             SettingAction("모든 데이터 삭제", Icons.Outlined.DeleteOutline, erase, "로그인 정보와 기록을 모두 지워요", contentColor = MaterialTheme.colorScheme.error)
         }
         SettingsSection("도움말과 앱 정보") {
-            SettingAction("알파 연결 실험실", Icons.Outlined.Science, { alphaLab = true }, "실험적 조회와 로그인 점검 · 실행 전 동의 필요", !busy)
+            SettingAction("공급사 추가 조회", Icons.Outlined.Search, { alphaLab = true }, "고객번호나 공식 로그인으로 요금을 확인해요", !busy)
             SettingAction("업데이트 확인", Icons.Outlined.SystemUpdate, update, "Google Play에서 최신 버전을 확인해요")
             SettingAction("테스터 그룹", Icons.Outlined.Groups, { open(AppLinks.TESTER_GROUP) }, "테스트 공지와 참여 계정을 관리해요")
             SettingAction("개인정보 처리방침", Icons.Outlined.PrivacyTip, { open(AppLinks.PRIVACY) })
@@ -913,10 +929,7 @@ class MainActivity : ComponentActivity() {
         text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             if (contracts.size > 1) contracts.forEach { contract -> OutlinedButton(onClick = { choose(contract) }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text(contract.label) } }
             else {
-                if (provider.experimentalReadOnly) {
-                    Text("실험적 조회 연결", fontWeight = FontWeight.Bold)
-                    Text("삼천리 개인회원 계정으로 로그인해 청구 이력을 조회해요. 아직 계정별 검증 중이므로 실패할 수 있어요. 검침값은 전송하지 않으며 오류가 나면 진단 기록을 복사해 알려 주세요.")
-                } else Text("${provider.name} 홈페이지 계정으로 로그인해요. 기기에서 공급사로 직접 연결해 청구 이력과 검침 기간을 확인하고, 동의한 경우 검침값도 입력할 수 있어요.")
+                Text("${provider.name} 홈페이지 계정으로 로그인해요. 기기에서 공급사로 직접 연결해 청구 이력과 검침 기간을 확인하고, 동의한 경우 검침값도 입력할 수 있어요.")
                 OutlinedTextField(username, { username = it }, label = { Text("아이디") }, singleLine = true, enabled = !busy)
                 OutlinedTextField(password, { password = it }, label = { Text("비밀번호") }, singleLine = true, enabled = !busy,
                     visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),

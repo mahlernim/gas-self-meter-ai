@@ -49,6 +49,19 @@ class GasappApiTest {
         assertEquals(0, server.requestCount)
     }
 
+    @Test fun mvnoCarrierUsesItsOwnRequiredTermsAndCode() = withApi { server, api ->
+        server.enqueue(response("""{"requestNo":"request","responseUniqId":"response"}"""))
+        val identity = GasappIdentity("홍길동", "01012345678", "900101", "1", "5")
+        val terms = listOf(
+            GasappTerms("본인인증 약관 SKT 알뜰폰", "required"),
+            GasappTerms("member", "required"),
+            GasappTerms("query", "required"),
+        )
+        api.requestSms(identity, terms)
+        val request = server.takeRequest()
+        assertEquals("5", JSONObject(request.body.readUtf8()).getString("mobileCo"))
+    }
+
     @Test fun accountsPreserveCompanyAndAmi() = withApi { server, api ->
         server.enqueue(response("""{"contracts":[{"company":1,"customerNum":"customer","useContractNum":"contract","amiYn":"Y"},{"company":9,"customerNum":"customer","useContractNum":"contract","amiYn":"N"}]}"""))
         val accounts = api.accounts(session)

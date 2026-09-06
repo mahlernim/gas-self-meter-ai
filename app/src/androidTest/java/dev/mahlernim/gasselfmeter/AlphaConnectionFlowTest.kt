@@ -25,7 +25,7 @@ class AlphaConnectionFlowTest {
         SecureStore(context).erase()
     }
 
-    @Test fun samchullyOffersExperimentalLoginWithoutSendingCredentials() {
+    @Test fun samchullyOffersAccountConnectionWithoutSendingCredentials() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             compose.awaitStorage(scenario)
             compose.onNodeWithText("부산").performScrollTo().performClick()
@@ -35,7 +35,7 @@ class AlphaConnectionFlowTest {
             compose.onNodeWithText("삼천리 연결하기").performScrollTo().performClick()
 
             compose.onNodeWithText("삼천리 연결").assertIsDisplayed()
-            compose.onNodeWithText("실험적 조회 연결").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithText("삼천리 홈페이지 계정으로 로그인해요.", substring = true).performScrollTo().assertIsDisplayed()
             compose.onNodeWithText("아이디").performScrollTo().assertIsDisplayed()
             compose.onNodeWithText("비밀번호").performScrollTo().assertIsDisplayed()
             compose.onNodeWithText("로그인하고 조회").assertIsNotEnabled()
@@ -83,24 +83,28 @@ class AlphaConnectionFlowTest {
         }
     }
 
-    @Test fun connectedSamchullyStaysReadOnlyAndOffersReconnectAndDiagnostics() {
-        val meter = SkensClient.opaque("alpha-ui-fake-meter")
+    @Test fun connectedSamchullyShowsManualSubmissionAndReconnect() {
+        val meter = "alpha-ui-fake-meter"
+        val customer = "0000000"
+        val now = System.currentTimeMillis()
+        val target = SelfReadTarget("synthetic-cycle", today().toString(), today().plusDays(1).toString(), true, false,
+            null, 100.0, Contract(customer, "samchully", "합성 계약"), "synthetic-target", "", "", "", meter)
         val data = AppData(
             profile = Profile(providerId = "samchully", meter = meter,
-                contract = SkensClient.opaque("samchully:0000000"), customerNumber = "0000000"),
+                contract = SkensClient.opaque("samchully:$customer"), customerNumber = customer, syncTime = now),
+            observations = listOf(Observation(now, 111.8, meter)),
+            credentials = Credentials("synthetic-user", "synthetic-password"),
+            submissionSettings = SubmissionSettings(automatic = false, reminder = false),
+            cachedSelfRead = target,
             ready = true,
-            samchullyBills = listOf(SamchullyBill("202608", null, null, null, null, 9.8, 12000.0, meter)),
         )
-        // No credentials or session means launch and tab navigation cannot refresh the provider.
         SecureStore(context).write(data)
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             compose.awaitStorage(scenario)
             compose.onNodeWithText("제출", useUnmergedTree = true).performClick()
-            compose.onNodeWithText("삼천리 조회 전용").assertIsDisplayed()
-            compose.onNodeWithText("삼천리 고객센터").performScrollTo().assertIsDisplayed()
-            compose.onNodeWithText("직접 제출", substring = true).assertDoesNotExist()
-            compose.onNodeWithText("자가검침 자동제출").assertDoesNotExist()
-            compose.onAllNodes(isToggleable()).assertCountEquals(0)
+            compose.onNodeWithText("자가검침 제출").assertIsDisplayed()
+            compose.onNodeWithText("111 m³ 직접 제출").performScrollTo().assertIsEnabled()
+            compose.onNodeWithText("이 공급사는 직접 제출만 지원해요.").performScrollTo().assertIsDisplayed()
 
             compose.onNodeWithText("설정", useUnmergedTree = true).performClick()
             compose.onNodeWithText("다시 연결").performScrollTo().performClick()

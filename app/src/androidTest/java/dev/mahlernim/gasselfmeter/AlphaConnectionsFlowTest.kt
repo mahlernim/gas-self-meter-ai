@@ -16,7 +16,7 @@ class AlphaConnectionsFlowTest {
     @get:Rule val compose = createComposeRule()
     private val context get() = InstrumentationRegistry.getInstrumentation().targetContext
     private val consentText = "내 계정 또는 조회 권한이 있는 고객번호이며, 선택한 공급사로 직접 보내 조회하는 데 동의해요."
-    private val runText = "조회 실험 실행"
+    private val runText = "추가 조회 실행"
 
     @After fun clean() { Diagnostics.clear(context) }
 
@@ -34,17 +34,17 @@ class AlphaConnectionsFlowTest {
         val calls = AtomicInteger()
         show { _, _, _ -> calls.incrementAndGet(); error("No runner may execute before consent") }
         compose.onNodeWithText("에너지톡").performScrollTo().performClick()
-        compose.onNodeWithText("공식 로그인 실험 시작").performScrollTo().performClick()
-        compose.onNodeWithText("에너지톡 실험적 조회").assertIsDisplayed()
-        compose.onNodeWithText("이 웹 화면은 조회 전용이 아니므로", substring = true)
+        compose.onNodeWithText("공식 로그인으로 조회").performScrollTo().performClick()
+        compose.onNodeWithText("에너지톡 조회").assertIsDisplayed()
+        compose.onNodeWithText("로그인 세션을 기기 메모리에서만 확인해", substring = true)
             .performScrollTo().assertIsDisplayed()
         // Capture the consent page only. Do not click the button that constructs the WebView.
         val screenshot = File(requireNotNull(context.getExternalFilesDir(null)), "energytalk-consent.png")
         assertTrue(UiDevice.getInstance(InstrumentationRegistry.getInstrumentation()).takeScreenshot(screenshot))
         compose.onNodeWithText("취소").performScrollTo().performClick()
-        compose.onNodeWithText("알파 연결 실험실").assertIsDisplayed()
-        compose.onNodeWithText("공식 로그인 실험 시작").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("에너지톡 실험적 조회").assertDoesNotExist()
+        compose.onNodeWithText("공급사 추가 조회").assertIsDisplayed()
+        compose.onNodeWithText("공식 로그인으로 조회").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("에너지톡 조회").assertDoesNotExist()
         compose.runOnIdle { assertEquals(0, calls.get()) }
     }
 

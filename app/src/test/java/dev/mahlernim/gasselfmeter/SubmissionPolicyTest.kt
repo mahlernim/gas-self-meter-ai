@@ -5,6 +5,14 @@ import org.junit.Test
 import java.time.LocalDate
 
 class SubmissionPolicyTest {
+    @Test fun firstPhysicalReadingCanBeSubmittedTodayWithoutForecastHistory() {
+        val initial = data().copy(periods = emptyList(), observations = listOf(Observation(time - 1000, 107.2, data().profile.meter)))
+        val decision = SubmissionPolicy.decide(initial, target, time, automatic = false)
+        assertTrue(decision.allowed)
+        assertEquals(107.2, decision.value!!, .001)
+        assertFalse(SubmissionPolicy.decide(initial, target, time, automatic = true).allowed)
+        assertFalse(SubmissionPolicy.decide(initial, target.copy(end = date.plusDays(1).toString()), time + 86_400_000, automatic = false).allowed)
+    }
     @Test fun persistedPendingAndUncertainRecordsBlockBothModesAfterReload() {
         for (status in listOf("pending", "uncertain", "confirmed")) {
             val record = SubmissionRecord("cycle", target.start, target.end, 107.0, time - 1000, status, "synthetic")

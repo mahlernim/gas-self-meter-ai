@@ -5,7 +5,8 @@ internal object BackgroundState {
     fun sameAccount(latest: AppData, expected: AppData): Boolean = latest.ready &&
         latest.profile.providerId == expected.profile.providerId && latest.profile.contract == expected.profile.contract &&
         latest.profile.meter == expected.profile.meter && latest.credentials == expected.credentials &&
-        sameGasapp(latest.gasappConnection, expected.gasappConnection)
+        sameGasapp(latest.gasappConnection, expected.gasappConnection) &&
+        latest.energyTalkConnection == expected.energyTalkConnection
 
     private fun sameGasapp(a: GasappConnection?, b: GasappConnection?): Boolean {
         if (a == null || b == null) return a == null && b == null
@@ -21,4 +22,3 @@ internal object BackgroundState {
         return latest.copy(submissions = (latest.submissions.filterNot { it.cycle == record.cycle } + record).takeLast(100))
     }
 }
-

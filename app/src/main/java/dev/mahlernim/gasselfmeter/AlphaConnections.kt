@@ -65,10 +65,10 @@ internal object AlphaConnections {
         "daesung", "daesungclean" -> requireNotNull(probe).let { client ->
             val result = client.check(identity, password)
             AlphaProbeResult(listOf(
-                "로그인 후 화면 구조 ${if (result.sessionStructureObserved) "관찰됨" else "미확인"} · 실제 인증 성공은 별도 확인이 필요해요.",
-                "월별 요금 페이지 ${if (result.billingPageReached) "접근 확인" else "미확인"}",
+                "로그인 화면 구조 ${if (result.sessionStructureObserved) "확인됨" else "확인하지 못했어요."}",
+                "월별 요금 페이지 ${if (result.billingPageReached) "확인됨" else "확인하지 못했어요."}",
                 "페이지의 표 ${result.tableCount}개 · 인식한 항목 ${result.recognizedBillingColumns.joinToString().ifBlank { "없음" }}",
-                "페이지 구조를 점검한 결과예요. 청구 이력 가져오기와 검침 제출은 아직 지원하지 않아요.",
+                "공급사 추가 조회 결과예요.",
             ), "공급사 $providerId · 단계 bills · 세션 유사 구조=${result.sessionStructureObserved} · 요금 페이지=${result.billingPageReached} · 표=${result.tableCount} · 인식 항목=${result.recognizedBillingColumns.joinToString()}")
         }
         else -> throw ProviderFailure("connect", "unsupported")
@@ -100,10 +100,10 @@ internal object AlphaConnections {
             result = AlphaProbeResult(buildList {
                 add("조회 주소 ${snapshot.address}")
                 snapshot.usage.forEach { add("${it.month} · ${it.amount}원 · ${it.usage}") }
-                snapshot.meter?.let { add("자가검침 상태 ${if (it.eligible) "가능 표시" else "불가 표시"} · 앱 내 제출은 지원하지 않아요.")
+                snapshot.meter?.let { add("자가검침 상태 ${if (it.eligible) "가능 표시" else "불가 표시"}")
                     add("이전 지침 ${it.previous ?: "정보 없음"} · 최근 지침 ${it.recent ?: "정보 없음"}") }
                 addAll(snapshot.unavailable)
-                add("공식 화면과 비교해 주세요. 참고용 결과이며 내 기록이나 추정 모델에 저장하지 않아요.")
+                add("조회 내용은 이 창에 표시하며 내 기록과 추정 모델에는 자동 반영하지 않아요.")
             }, "EnergyTalk 공급사 ${snapshot.clientId} · 사용량 ${snapshot.usage.size}행 · 검침 상태 있음=${snapshot.meter != null} · 미확인 영역 ${snapshot.unavailable.size}개")
             energyOpen = false
         })
@@ -113,17 +113,17 @@ internal object AlphaConnections {
     val valid = if (quickBill) identity.trim().matches(Regex("[0-9]{1,9}")) else identity.isNotBlank() && password.isNotBlank()
     fun close() { requestJob?.cancel(); onDismiss() }
     AlertDialog(onDismissRequest = ::close,
-        title = { Text("알파 연결 실험실") },
+        title = { Text("공급사 추가 조회") },
         text = {
             Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("검증 중인 연결을 직접 시험할 수 있어요. 실험을 시작하기 전에는 요청을 보내지 않으며, 앱의 가져오기 기능은 검침값을 제출하지 않아요.")
+                Text("선택한 공급사의 청구 정보와 자가검침 상태를 추가로 확인할 수 있어요. 조회를 시작할 때 선택한 공급사에만 요청합니다.")
                 Row {
-                    FilterChip(selected = !energyMode, enabled = !busy, onClick = { energyMode = false; result = null; error = null; consent = false }, label = { Text("공급사 직접 조회") })
+                    FilterChip(selected = !energyMode, enabled = !busy, onClick = { energyMode = false; result = null; error = null; consent = false }, label = { Text("고객번호·계정 조회") })
                     Spacer(Modifier.width(8.dp))
                     FilterChip(selected = energyMode, enabled = !busy, onClick = { energyMode = true; identity = ""; password = ""; result = null; error = null; consent = false }, label = { Text("에너지톡") })
                 }
                 if (energyMode) {
-                    Text("11개 서비스 구분의 공식 로그인과 사용량·자가검침 상태 조회를 시험해요. 공급사별 실제 계정 호환성은 아직 검증 중이에요.")
+                    Text("선택한 EnergyTalk 공급사의 공식 로그인과 사용량·자가검침 상태를 확인해요.")
                     Box {
                         OutlinedButton(onClick = { menu = true }) { Text(AlphaConnections.energyTenants.getValue(energyTenant)) }
                         DropdownMenu(menu, onDismissRequest = { menu = false }) {
@@ -132,8 +132,7 @@ internal object AlphaConnections {
                             }) }
                         }
                     }
-                    Text("공식 웹 화면에서는 가입·결제·검침 제출도 가능해요. 다음 동의 화면의 주의사항을 확인해 주세요.")
-                    Button(onClick = { result = null; copied = false; energyOpen = true }) { Text("공식 로그인 실험 시작") }
+                    Button(onClick = { result = null; copied = false; energyOpen = true }) { Text("공식 로그인으로 조회") }
                 } else {
                 Box {
                     OutlinedButton(onClick = { menu = true }, enabled = !busy) { Text(Providers.get(providerId).name) }
@@ -146,7 +145,7 @@ internal object AlphaConnections {
                     }
                 }
                 Text(if (quickBill) "고객번호로 현재 고지금액·보정사용량을 조회해요. 비밀번호나 문자 인증은 사용하지 않아요."
-                    else "아이디와 비밀번호로 로그인한 뒤 월별 요금 페이지에 접근할 수 있는지 점검해요. 청구 이력 자동 가져오기는 아직 제공하지 않아요.")
+                    else "아이디와 비밀번호로 로그인한 뒤 월별 요금 페이지를 확인해요.")
                 OutlinedTextField(identity, { if (it.length <= 100) identity = it }, enabled = !busy, singleLine = true,
                     label = { Text(if (quickBill) "고객번호 (최대 9자리)" else "아이디") }, modifier = Modifier.fillMaxWidth(),
                     keyboardOptions = KeyboardOptions(keyboardType = if (quickBill) KeyboardType.Number else KeyboardType.Text))
@@ -166,7 +165,7 @@ internal object AlphaConnections {
                 if (report != null) {
                 TextButton(onClick = {
                     context.getSystemService(ClipboardManager::class.java).setPrimaryClip(
-                        ClipData.newPlainText("알파 연결 점검", "앱 ${BuildConfig.VERSION_NAME}\n$report"))
+                    ClipData.newPlainText("공급사 추가 조회", "앱 ${BuildConfig.VERSION_NAME}\n$report"))
                     copied = true
                 }) { Text(if (copied) "진단 요약 복사됨" else "개인정보 없는 진단 요약 복사") }
                 TextButton(onClick = { AlphaFeedback.share(context, report) }) { Text("피드백 초안 보내기") }
@@ -183,7 +182,7 @@ internal object AlphaConnections {
                     error = withContext(Dispatchers.IO) { Diagnostics.record(context, selected, "connect", e) }
                 } finally { password = ""; busy = false; consent = false }
             }
-        }) { Text("조회 실험 실행") } },
+        }) { Text("추가 조회 실행") } },
         dismissButton = { TextButton(onClick = {
             if (busy) { requestJob?.cancel(); error = "조회를 취소했어요. 다시 실행할 수 있어요." } else close()
         }) { Text(if (busy) "조회 취소" else "닫기") } },
