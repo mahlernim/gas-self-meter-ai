@@ -1,51 +1,25 @@
-# Local estimation model
+# 지침과 사용량을 추정하는 방법
 
-The word AI in the product name refers to a local adaptive statistical estimator. It does not call a language model or require a cloud API key.
+앱은 계량기의 실제 누적 숫자와 청구 이력을 함께 사용해 오늘의 누적 지침과 하루 사용량을 계산합니다. 이 계산은 기기에서만 이루어지며 외부 AI 서비스나 클라우드 API를 사용하지 않습니다.
 
-## Historical baseline
+## 필요한 정보
 
-A usage segment is an inclusive date range and its raw meter-volume difference in m³. The daily rate for a historical calendar month is the sum of each segment's proportional volume inside that month divided by the covered days. At least 14 covered days are required. Overlapping segments are rejected to avoid double counting. Calendar-only manual input assumes usage was evenly distributed within that month.
+계량기를 한 번 확인하면 현재 지침의 기준점이 생깁니다. 사용량 변화까지 반영하려면 하루 이상 간격을 둔 실제 확인 두 번이 도움이 됩니다. 작년 같은 시기의 청구 이력이 있으면 계절에 따른 사용 흐름도 계산에 반영합니다.
 
-For a target date, use the corresponding month one year earlier. Interpolate its daily rate with the preceding or following historical month's rate, using the 15th as each month's center. This is the 13/12/11-month seasonal idea expressed on actual dates. If a neighboring month is absent, keep the central month's rate. If the central month is absent, the seasonal baseline is unavailable. Leap-year month lengths are respected.
+청구 이력이 없을 때는 하루 이상 간격의 실제 확인값 두 개를 기준으로, 마지막 확인 후 최대 14일 동안 추정합니다. 마지막 확인 후 60일이 지나면 새 계량기 확인을 요청합니다.
 
-## Recent calibration
+## 계산 방식
 
-Use the latest physical observation for the active meter and earlier checks between one and 28 days before it. The recent daily rate is the median of all positive-time pairwise slopes in this window, clamped to zero if negative. This reduces an isolated misreading's influence on both the recent rate and seasonal calibration. The latest cumulative anchor itself still needs a correct physical reading.
+작년 같은 달의 하루 평균 사용량을 기본 흐름으로 사용합니다. 앞뒤 달의 흐름도 함께 반영해 계절이 바뀌는 시기의 변화를 부드럽게 연결합니다. 최근 실제 확인값이 있으면 그 가구의 최근 사용량에 맞춰 기본 흐름을 조정합니다.
 
-Multiply the robust recent daily rate by the window's elapsed days and compare that volume with the integrated seasonal baseline over the same interval. When the baseline exceeds 0.01 m³, their ratio is capped between 0 and 5. Shrink that ratio toward 1 with weight
+청구 기간이 여러 달에 걸치면 기간별로 사용량을 나누어 계산합니다. 같은 날짜를 겹쳐 기록한 청구 이력은 사용하지 않습니다. 계량기를 교체하면 새 계량기부터 별도로 기록합니다.
 
-```
-spanDays / (spanDays + 7) * clamp(1 - daysSinceLatestObservation / 28, 0, 1)
-```
+## 계량기 확인
 
-The seasonal rate is multiplied by `1 + weight * (ratio - 1)`. Decay is evaluated on each integrated date, so later projections do not retroactively reduce the elapsed cumulative consumption. If the seasonal ratio is unavailable, blend the recent rate with the bias-corrected seasonal rate. The recent blend decreases linearly to zero over 14 days rather than stopping at a step. These guardrails are engineering choices and are not calibrated prediction intervals.
+계량기 숫자를 직접 입력하거나 `+0.1`, `−0.1`로 조정한 뒤 `이 숫자로 확인`을 누르면 실제 확인값으로 저장합니다. 짧은 시간 안에 숫자를 고치면 가장 최근 확인값을 수정합니다. 이전 확인값보다 작은 숫자는 저장할 수 없습니다. 계량기를 교체했다면 설정에서 새 계량기로 시작해 주세요.
 
-When the in-window seasonal ratio is unavailable, stored pre-check forecasts can supply a multiplicative calibration bias. For up to 12 comparable checks, compare actual and predicted increments from the preceding anchor. Each increment must be at least 0.5 m³. Average their log ratios with a 0.7 decay per older usable sample, exponentiate, and clamp the multiplier to [0.5, 2]. Do not apply this correction alongside the seasonal ratio because that would count the same deviation twice. The stored forecasts can come from earlier app versions, and this learning rule is not evidence of improved real-household accuracy. Monthly seasonal rates are memoized within each estimate call.
+계산한 누적 지침은 실측값이 아닙니다. 검침값을 제출하기 전에는 계량기의 실제 숫자를 확인해 주세요.
 
-Without seasonal history, use the recent observed daily rate for no more than 14 days after the last physical observation. A single physical reading is an anchor, not enough evidence to infer a consumption rate. A latest anchor older than 60 days disables estimates even with seasonal history.
+## 참고 요금
 
-## Anchors and presentation
-
-The latest physical reading or matching-meter end-of-bill reading anchors the cumulative display. An inclusive bill end date becomes the start of the following day as its approximate boundary timestamp. Within-day rate integration uses Korean local dates. The actual meter-reader time is unavailable, which adds uncertainty.
-
-Meter replacement starts a new active meter identifier. Prior physical observations are retained for inspection but cannot anchor the replacement. Historical household usage may still inform seasonality. Reset the household data when moving to another household.
-
-The app distinguishes cumulative meter estimate, daily usage rate, and usage since the last bill boundary. A future planned reading date can show a forecast with today's evidence frozen. It never treats a forecast as a measurement.
-
-`계량기 보고 보정하기` opens a physical-confirmation dialog. Enter the observed reading or adjust it with `+0.1` and `−0.1`, then choose `이 숫자로 확인` to save. This records a local physical observation and does not submit it to the supplier. Adjustments within ten minutes replace the previous check and retain the original pre-correction forecast. A decreasing meter reading is rejected against the preceding anchor. Correct an erroneous older observation by deleting it, or start a new meter when appropriate.
-
-## Cost
-
-When available, the latest bill supplies an effective cost per raw m³ from its energy-charge lines, including 10% VAT, plus the bill's VAT-inclusive base charge. Applying this to the estimated current-period usage produces a provisional historical-rate amount. Discounts and adjustments disable it when recognized. It is neither a live tariff calculation nor an amount payable. The first release does not scrape changing nationwide tariffs.
-
-## Accuracy and limits
-
-No household-level forecast-accuracy claim has been validated. Weekly readings are recommended, not required by a demonstrated optimal schedule. Weather, occupancy, hot-water patterns, heating changes, partial month coverage and reading-time uncertainty can all shift the result. The app does not claim that the 0.1 m³ adjustment step implies that level of forecast accuracy.
-
-### Historical prediction differences in 0.4.0
-
-The dashboard reports the mean and maximum absolute difference between a physical check and its stored pre-check forecast. It uses the current meter only, excludes future checks and checks older than 90 days, and keeps up to 12 distinct Korean calendar days. At least three comparable days are required. Exact duplicates count once, conflicting records at the same timestamp are excluded, and only the earliest comparable check on each day is retained so repeated corrections cannot inflate the sample count. Invalid or missing values are omitted. The comparison date range and sample count are shown.
-
-This is a descriptive history, not an error bound around today's estimate, a confidence interval, a same-horizon benchmark or a guarantee of submission safety. Check intervals and model versions can differ. The summary never recomputes historical forecasts using later observations, changes estimates, or changes manual or automatic submission decisions. A calibrated uncertainty interval and its submission-policy implications remain separate work under issue #42.
-
-See the estimator and parser tests for partial-day integration, seasonal adjustment, cold start, stale observations, zero consumption, leap months, meter replacement, corrections, overlap rejection, and year-boundary bill parsing.
+청구서에 사용량과 요금 정보가 있으면 최근 청구서를 기준으로 이번 기간의 참고 요금을 보여줍니다. 할인, 정산, 단가 변경 등은 실제 청구서에 따라 달라질 수 있으므로 납부 금액은 공급사의 청구서를 확인해 주세요.
