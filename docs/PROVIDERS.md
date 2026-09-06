@@ -1,4 +1,49 @@
-# Korean gas-provider integration research
+# 공급사 지원 범위
+
+2026년 9월 6일 소스 버전 0.4.2를 기준으로 정리했습니다. 배포 채널의 앱 버전은 다를 수 있습니다. 구현된 기능은 지원으로 표시하며, 실계정 검증 여부는 별도로 기록합니다.
+
+## 지원 기능
+
+모든 공급사에서 앱 내 사용량·실측 기록, 추정, 알림과 백업을 지원합니다. **앱 내 수동 기록**은 기기에 값을 저장하는 기능이며 **공급사 제출**은 공급사 서버에 검침값을 보내는 기능입니다.
+
+| 공급사 또는 채널 | 구현 기준 지원 기능 | 앱 화면과 기록 반영 | 실계정 검증 |
+| --- | --- | --- | --- |
+| 부산도시가스 | 로그인, 계약·청구·검침 상태 조회, 사용자 확인 제출, 조건부 마지막 날 자동 제출 | 연결 및 이력 가져오기 지원 | 로그인·이력 조회 검증 기록 있음. 제출 성공 미검증 |
+| 나머지 SK E&S 7개 공급사 | 로그인, 계약·청구·검침 상태 조회, 사용자 확인 제출 | 연결 및 이력 가져오기 지원. 백그라운드 자동 제출 비활성 | 공급사별 검증 미완료 |
+| 가스앱 14개 공급사 | 본인인증, 계약·청구·계량기·검침 상태 조회, 사용자 확인 제출, 조건부 마지막 날 자동 제출 | 연결 및 이력 가져오기 지원 | 실계정 인증·제출 성공 미검증 |
+| 삼천리 | 개인 계정 로그인, 계약 선택, 청구 이력 조회 | 알파 조회 전용 연결 및 이력 가져오기 지원. 제출 미지원 | 계정별 호환성 미검증 |
+| 경남에너지 고객번호 조회 | 고지월·금액·보정사용량·사용열량 조회 | 실험실에서 참고 표시. 이력 가져오기·제출 미지원 | 미검증 |
+| 대성에너지·대성청정에너지 | 공식 로그인 폼과 월별 요금 페이지 구조 점검 | 실험실에서 구조 점검 결과 표시. 청구 이력 가져오기·제출 미지원 | 실제 로그인 성공을 판정하는 기능은 아님 |
+| EnergyTalk | 공식 웹 로그인·주소 선택 후 사용량·자가검침 상태 조회 | 실험실에서 참고 표시. 이력 가져오기·앱 자체 제출 미지원 | 미검증 |
+| 그 밖의 공급사 | 앱 내 수동 기록과 추정 | 수동 기록 화면 지원 | 공급사 통신 없음 |
+
+실계정 미검증은 구현된 기능을 미지원으로 분류하는 기준이 아닙니다. 합성 응답 검사와 실제 계정 성공은 서로 다른 검증 상태이며, 공급사 메뉴가 있다는 이유만으로 앱의 이력 가져오기나 제출 기능까지 지원한다고 표시하지 않습니다. 이번 문서 갱신에서는 실제 로그인·고객 조회·제출을 실행하지 않았습니다.
+
+## 전체 공급사 목록
+
+앱에는 이름이 있는 공급사 31개 항목과 `다른 공급사 / 직접 입력`이 있습니다. 아래 채널에는 중복 공급사가 있으므로 행별 개수를 더해 공급사 수로 세지 않습니다.
+
+| 채널 | 공급사 |
+| --- | --- |
+| SK E&S | 부산도시가스, 코원에너지서비스, 충청에너지서비스, 영남에너지서비스 구미, 영남에너지서비스 포항, 전남도시가스, 강원도시가스, 전북에너지서비스 |
+| 가스앱 | 서울도시가스, 예스코, 인천도시가스, 대륜E&S, 귀뚜라미에너지, JB, 전북도시가스, 군산도시가스, 제주도시가스, 참빛도시가스, 경동도시가스, MC에너지(구 목포도시가스), 미래엔서해에너지, 대화도시가스 |
+| 삼천리 | 삼천리 |
+| 고객번호 조회 실험 | 경남에너지 |
+| 로그인·페이지 구조 점검 실험 | 대성에너지, 대성청정에너지 |
+| EnergyTalk 실험 | CNCITY에너지, 경남에너지, 귀뚜라미에너지, 미래엔서해에너지, 서라벌도시가스, GSE, 참빛도시가스 |
+| 수동 기록만 지원 | 해양에너지, 명성파워그린 |
+
+참빛도시가스는 여러 지역 회사를 한 선택 항목으로 묶습니다. EnergyTalk의 11개 서비스 구분은 지역·지점을 포함하며 11개 독립 공급사를 뜻하지 않습니다. 청구서에서 실제 공급사 이름을 확인해 주세요. 전북에너지서비스와 전북도시가스, 대성에너지와 대성청정에너지는 별개 공급사입니다.
+
+## 제출 범위
+
+부산도시가스와 가스앱은 사용자 확인 제출과 선택적인 마지막 날 자동 제출을 지원합니다. 다른 SK E&S 공급사는 사용자 확인 제출만 지원합니다. 삼천리와 실험실 조회에는 앱 자체 제출 기능이 없습니다.
+
+자동 제출은 기본적으로 꺼져 있습니다. 전송 전에 계약·계량기, 대상 여부, 검침 기간, 기존 제출, 이전 지침, 실측 설정과 전송 기록을 확인합니다. 결과가 불확실하면 자동으로 다시 보내지 않습니다. 가스앱의 서비스 등록이나 채널 변경은 별도 동의를 받습니다. 자세한 구현 범위는 [가스앱 연동](GASAPP.md)에 기록합니다.
+
+## 알파 연결과 검증 상세
+
+아래 내용은 현재 제공되는 연결과 실험의 경계 및 개인정보 처리 설명입니다. [알파 가정](PROTOCOL_ASSUMPTIONS.md), [검증 기록](VALIDATION.md), [개인정보 안내](../PRIVACY.md)를 함께 참고하세요.
 
 ## Alpha iteration policy from 0.4.1
 
@@ -39,17 +84,9 @@ Samchully is available as an explicitly experimental read-only connection for al
 The app now includes an independently implemented Gasapp SMS authentication and contract workflow for 14 configured supplier brands. It retrieves bills, meter information and submission windows, supports explicit direct submission and optional last-day submission, and preserves uncertain outcomes without repeating the POST. Required terms and service/channel changes need in-app user consent. Marketing consent defaults to no. See [GASAPP.md](GASAPP.md) for current endpoint coverage and synthetic validation. The research notes below describe earlier observations and do not claim live customer authentication or submission verification.
 
 
-## SK E&S 검침값 입력
+## 출처와 라이선스
 
-0.2.1은 단순 기록을 넘어 공급사의 자가검침 가능 기간과 기존 입력 상태를 확인하고, 계산한 누적 지침을 직접 또는 조건부로 자동 입력하도록 설계했습니다. 자동 입력은 기본적으로 꺼져 있으며 검침 기간 마지막 날에만 실행합니다.
-
-공식 자가검침 페이지에서 입력 주소와 필드 구조를 확인했습니다. 대상 조회 응답의 기간, 자가검침 대상 여부, 이전 지침, 계량기 식별값과 내부 식별값을 그대로 사용합니다. 제출 전후에 공급사 상태를 조회하고 결과가 불확실하면 다시 보내지 않습니다.
-
-2026년 9월 4일 현재 실제 제출은 수행하지 않았습니다. 정확한 계량기 값과 입력 가능 기간을 확인한 사용자 계정에서 단 한 번의 직접 입력을 검증하기 전까지 이 기능이 실제 공급사에서 정상 완료된다고 단정하지 않습니다.
-
-아래 내용은 2026년 9월 3일에 수행한 공급사 연동 조사 기록입니다. 소스 확인, 공개 주소 조회와 인증 계정 검증은 서로 다른 수준의 근거입니다.
-
-## Useful code beyond SK E&S
+아래 공개 참고 프로젝트의 기능을 이 앱의 지원 기능으로 간주하지 않습니다. 검사한 revision과 당시의 라이선스 관찰을 보존합니다. 라이선스가 확인되지 않은 가스앱 소스는 재배포하지 않으며 이 앱의 연동은 독립 구현입니다.
 
 | Reference | What it demonstrates | Limits |
 | --- | --- | --- |
@@ -57,50 +94,4 @@ The app now includes an independently implemented Gasapp SMS authentication and 
 | [hwajin-me/home-assistant-korea-components](https://github.com/hwajin-me/home-assistant-korea-components/tree/6b5d17e10411054f45a6fbe904f7c152d818c307/custom_components/korea_incubator/gasapp) | A smaller Gasapp reader using token, member, company and contract values to read home/bill data | No applicable license found for this module. Manual token setup and uncertain session lifetime |
 | [dugurs/ha-city-gas-bill](https://github.com/dugurs/ha-city-gas-bill/tree/48940284b101a00d60673545bd13e261c128243a) | MIT-licensed public tariff/caloric scrapers for several SK and non-SK providers | Tariff access is not customer billing-history access. Some adapters provide only heat factors or require manual prices |
 
-The [official Gasapp website](https://www.gasapp.co.kr/) lists Seoul City Gas, Yesco, Incheon City Gas, Daeryun E&S, JB, Gunsan, Jeju, Kiturami Energy, Chambit, MC Energy, Kyungdong, Miraen Seohae, Daehwa and Jeonbuk among its service areas. That is promising shared infrastructure for future expansion. It does not establish that every company's full billing history uses the same schema or that the app can obtain enough dated history for this estimator.
-
-No directly useful customer-history connector was found in the bounded GitHub searches for Samchully, CNCITY and Gyeongnam Energy domains. This is a search result, not a claim that no such code exists.
-
-## Gasapp protocol observations
-
-The inspected source uses `https://app.gasapp.co.kr/api/`. Its request sequence includes SMS request and confirmation, member handling, `init` for contracts, `home` for cards, `meters`, and `bills/summary`. Headers include member, token, company, platform and application-version values. These are internal app endpoints, not an advertised public developer API.
-
-`home` can expose bill and indication history, but actual coverage, date boundaries, volume units, pagination and ordering need an authorized account test. The two references make different ordering assumptions, so any new adapter should sort explicit dates and validate units. An old endpoint name alone is not enough to claim compatibility.
-
-The SMS/member flow may create or update a member and accept service agreements. Research did not call these endpoints, send SMS, register accounts, refresh customer sessions or submit meter readings. A future user-facing connection must explain the account action and follow the legitimate authentication/consent flow. No Busan credential was sent to a different provider.
-
-Because no applicable license was found for the two Gasapp implementations, their code is not redistributed in this project. A future implementation can use documented protocol observations and independently written code, or obtain an appropriate license from the author.
-
-## Public non-SK queries verified
-
-All queries below were read-only and used no customer account.
-
-| Provider | Observed public mechanism | Result |
-| --- | --- | --- |
-| Seoul City Gas | CSRF metadata from `/front/payment/gasPayTable`, then JSON POST to `/ajax/front/payment/gasPayTable` with `gaspayArea` `01` | HTTP 200 with residential tariff rows. The initial probe incorrectly used `1` and was corrected to `01` |
-| Yesco | POST `/Common/connApiServer.do` with public tariff operation `E0006` and effective-date input | Success, 105 rows, residential rates returned |
-| Incheon City Gas | Public DWR `ICGAS.getChargecost.dwr` with region, usage class and effective date | HTTP 200 with the expected numeric rate field |
-| Gasapp frontend | Public landing page and its referenced JavaScript | HTTP 200. Split frontend bundles mean the bootstrap alone does not reveal the full API |
-
-Numeric tariffs are observations at the research date and are deliberately not hardcoded into the app. No customer history access was established by these tariff queries. Raw investigation scripts and internal capture records are not part of the public specification.
-
-## SK E&S findings
-
-The eight public login pages for Busan, Cowon, Chungcheong, Yeongnam Gumi, Yeongnam Pohang, Jeonnam, Gangwon and Jeonbuk Energy Service share the same normalized login function. Public caloric pages share a request shape. Both `www.skens.com` and `ebpp.skens.com` variants returned HTTP 200 during the audit.
-
-The shared SK E&S adapter selects both the portal path and company identifier. The configured pairs are `busan`/`C000`, `koone`/`B000`, `cheongju`/`D000`, `gumi`/`E000`, `pohang`/`F000`, `jeonnam`/`G000`, `gangwon`/`J000` and `jeonbuk`/`K000`. These providers use the automatic account workflow and user-confirmed direct submission. Busan retains the existing opt-in background submission. The other regions rely on the verified common portal structure and keep background submission disabled until region-specific account fixtures are available.
-
-An authorized live account test through [ha-busan-city-gas](https://github.com/mahlernim/ha-busan-city-gas/tree/320513798301d491e3984fae8bb1a1cede22e8c0) succeeded for login, one contract, meter metadata and all 13 advertised billing months. The histories included dated usage segments and matching current-meter identity. Due dates were not extracted by that parser. No daily forecast-accuracy study was performed. No submission took place.
-
-## Regional selection
-
-A region does not uniquely determine the provider. Seoul and Gyeonggi have several. Jeonbuk Energy Service and Jeonbuk City Gas are separate companies, and Incheon City Gas is not Cowon Energy Service. The app asks for the provider after the region and offers a manual fallback. The [KOGAS supplier directory](https://www.kogas.or.kr/site/koGas/1020408040000) is linked when a supplier is missing.
-
-## Next connector acceptance criteria
-
-1. An authorized account can sign in through its legitimate flow without bypassing verification.
-2. Multiple contracts can be identified and selected, with no data mixing between households.
-3. At least the available historical periods, units and meter identities can be parsed and verified. Missing history must remain missing.
-4. Session expiry and changed response schemas produce understandable errors and preserve existing records.
-5. Local credential handling, export exclusion and the read-only request boundary have been verified on Android.
-6. Source licensing and attribution are resolved before redistributing borrowed code.
+사용 라이브러리의 출처와 라이선스는 [NOTICE](../NOTICE.md)에 기록합니다.

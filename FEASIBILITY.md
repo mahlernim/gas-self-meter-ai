@@ -1,6 +1,6 @@
 똑똑 자가검침 AI feasibility assessment
 
-This is the initial research and design record. The implemented v0.1.0 scope is documented in [README](README.md), the final local model in [estimation](docs/ESTIMATION.md), and the subsequent non-SK source and endpoint research in [providers](docs/PROVIDERS.md). Future proposals below, including weather, background provider refresh and accuracy studies, are not claims of shipped functionality.
+This is the initial research and design record from September 3, 2026. Current implemented support is documented in [README](README.md) and [provider support](docs/PROVIDERS.md), and the local model in [estimation](docs/ESTIMATION.md). Proposals and integration assessments below describe the original design stage, not the current support matrix or shipped functionality.
 
 Research date 2026-09-03. This document distinguishes observed behavior from proposed app design. The reference component was inspected at commit `320513798301d491e3984fae8bb1a1cede22e8c0`.
 
@@ -39,7 +39,7 @@ The due-date result is a parser limitation or a data-availability question that 
 | 강원도시가스 | `gangwon` | Matching public login implementation |
 | 전북에너지서비스 | `jeonbuk` | Matching public login implementation |
 
-The reproducible public audit is saved in `research/provider-public-audit.json`, with its script beside it. Public entry points include the [Busan login](https://www.skens.com/busan/login/login.do) and [Cowon login](https://www.skens.com/koone/login/login.do).
+Public entry points include the [Busan login](https://www.skens.com/busan/login/login.do) and [Cowon login](https://www.skens.com/koone/login/login.do).
 
 A reusable SK connector must parameterize more than the URL. The implementation now carries each provider's portal path and company identifier through contract identities and billing requests. Company codes, tariff categories, response differences, and account linkage still need verification per provider. The shared connector therefore fails closed on unexpected schemas, and background submission remains disabled outside Busan until a legitimate account test is available.
 
@@ -47,7 +47,7 @@ A reusable SK connector must parameterize more than the URL. The implementation 
 
 Region selection should narrow the provider list, then confirm the provider or ask for a district when needed. Seoul and Gyeonggi contain several providers, and some districts are split. Busan can default to 부산도시가스. Preserve a direct provider chooser for users who know their supplier. Do not confuse 전북에너지서비스 with 전북도시가스. [KOGAS provider and supply-area directory](https://www.kogas.or.kr/site/koGas/1020408040000).
 
-**Suggested first-use flow.** Select region, confirm provider, enter provider credentials, choose a linked contract if there are several, import the latest bill and available history, then confirm today's physical meter reading. The latest bill can establish a dated initial anchor if the meter matches, but a fresh physical reading gives a better start. Show current results as soon as the latest bill arrives and fetch older bills progressively. The read-only test results are recorded separately in `research/busan-read-only-results.json`.
+**Suggested first-use flow.** Select region, confirm provider, enter provider credentials, choose a linked contract if there are several, import the latest bill and available history, then confirm today's physical meter reading. The latest bill can establish a dated initial anchor if the meter matches, but a fresh physical reading gives a better start. Show current results as soon as the latest bill arrives and fetch older bills progressively. The read-only results and their limits are summarized in the live-check table above.
 
 Provide direct links for account recovery and registration. Busan's recovery page is [아이디/비밀번호 찾기](https://www.skens.com/busan/login/find.do), and its login page offers member and guest verification flows. Account recovery in a browser does not automatically sign the app in. The user returns to the app with the recovered credentials. New residents may also need the provider to link their supply contract. [Official login](https://www.skens.com/busan/login/login.do).
 
