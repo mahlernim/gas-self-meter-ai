@@ -148,6 +148,7 @@ private sealed interface Confirmation {
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var calibration by rememberSaveable { mutableStateOf<String?>(null) }
     var addHistory by rememberSaveable { mutableStateOf(false) }
+    var editingStart by rememberSaveable { mutableStateOf<String?>(null) }
     var loginProviderId by rememberSaveable { mutableStateOf<String?>(null) }
     var confirmation by remember { mutableStateOf<Confirmation?>(null) }
     var restorePreview by remember { mutableStateOf<AppData?>(null) }
@@ -256,7 +257,7 @@ private sealed interface Confirmation {
                         notification.launch(Manifest.permission.POST_NOTIFICATIONS)
                     } else vm.setSubmissionSettings(settings)
                 })
-                2 -> HistoryPage(data, { addHistory = true }, { period -> confirmation = Confirmation.DeletePeriod(period) }, { observation -> confirmation = Confirmation.DeleteObservation(observation) })
+                2 -> HistoryPage(data, { addHistory = true }, { period -> editingStart = period.start }, { period -> confirmation = Confirmation.DeletePeriod(period) }, { observation -> confirmation = Confirmation.DeleteObservation(observation) })
                 3 -> SettingsPage(data, {
                     notificationPurpose = "calibration"
                     if (Build.VERSION.SDK_INT >= 33) notification.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -288,8 +289,13 @@ private sealed interface Confirmation {
             confirmButton = { TextButton(onClick = { vm.submitReading(value); submitValue = null }) { Text("$valueText m³ 입력") } },
             dismissButton = { TextButton(onClick = { submitValue = null }) { Text("취소") } })
     }
-    if (addHistory) HistoryDialog(vm.busy, { addHistory = false }) { start, end, value, result ->
+    if (addHistory) HistoryDialog(vm.busy, close = { addHistory = false }) { start, end, value, result ->
         vm.addPeriod(start, end, value) { error -> result(error); if (error == null) addHistory = false }
+    }
+    data.periods.firstOrNull { it.manual && it.start == editingStart }?.let { original ->
+        HistoryDialog(vm.busy, editing = original, close = { editingStart = null }) { start, end, value, result ->
+            vm.editPeriod(original, start, end, value) { error -> result(error); if (error == null) editingStart = null }
+        }
     }
     loginProviderId?.let { providerId ->
         val connectionProvider = Providers.get(providerId.removePrefix("energytalk:"))
@@ -366,12 +372,19 @@ private sealed interface Confirmation {
                 Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(18.dp)) {
                     Text("이 앱이 사용하는 오픈소스 구성요소와 라이선스 원문을 확인할 수 있어요.", color = Muted)
                     if (sections.isEmpty()) Text(loadError ?: "라이선스를 읽는 중이에요.")
+                    // Four full licence texts at once made this one very long scroll. Each opens on
+                    // demand instead; the titles and summaries stay visible.
                     sections.forEachIndexed { index, section ->
                         if (index > 0) HorizontalDivider()
+                        var open by rememberSaveable(section.first) { mutableStateOf(false) }
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text(section.first, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
                             Text(section.second, color = Muted, style = MaterialTheme.typography.bodySmall)
-                            Text(section.third, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+                            TextButton(onClick = { open = !open }, contentPadding = PaddingValues(0.dp)) {
+                                Text(if (open) "원문 접기" else "원문 보기", style = MaterialTheme.typography.bodySmall)
+                                Icon(if (open) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore, null, Modifier.size(18.dp))
+                            }
+                            if (open) Text(section.third, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
                         }
                     }
                 }
@@ -444,7 +457,7 @@ private sealed interface Confirmation {
     if (alphaLab) AlphaConnectionsDialog(providerId, onDismiss = { alphaLab = false })
     Page {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Image(painterResource(R.drawable.app_icon), null, Modifier.size(56.dp).clip(RoundedCornerShape(16.dp)))
+            Image(painterResource(R.drawable.ic_app_logo), null, Modifier.size(56.dp).clip(RoundedCornerShape(16.dp)))
             Column { Text("똑똑", fontSize = 25.sp, fontWeight = FontWeight.ExtraBold); Text("자가검침 AI", color = Muted, style = MaterialTheme.typography.labelLarge) }
         }
         Title("일주일에 한 번,\n우리 집 가스를 알아가요", "작년의 계절 흐름과 직접 확인한 숫자로\n오늘의 사용량을 가늠해요.")
@@ -491,7 +504,7 @@ private sealed interface Confirmation {
     Page {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) { Text("똑똑 자가검침 AI", fontWeight = FontWeight.ExtraBold, fontSize = 24.sp); Text("${today().format(DateTimeFormatter.ofPattern("M월 d일 EEEE", Locale.KOREAN))}", color = Muted, style = MaterialTheme.typography.bodySmall) }
-            Image(painterResource(R.drawable.app_icon), "똑똑 앱 아이콘", Modifier.size(48.dp).clip(CircleShape))
+            Image(painterResource(R.drawable.ic_app_logo), "똑똑 앱 아이콘", Modifier.size(48.dp).clip(CircleShape))
         }
         if (data.profile.meter == "demo") Badge("예시 데이터 · 실제 우리 집 기록이 아니에요", Color(0xFFFFE5D9))
         Text(provider.name, color = Muted, style = MaterialTheme.typography.labelLarge)
@@ -698,13 +711,18 @@ private sealed interface Confirmation {
     }
 }
 
-@Composable private fun HistoryPage(data: AppData, add: () -> Unit, delete: (UsagePeriod) -> Unit, deleteObservation: (Observation) -> Unit) {
+@Composable private fun HistoryPage(data: AppData, add: () -> Unit, edit: (UsagePeriod) -> Unit, delete: (UsagePeriod) -> Unit, deleteObservation: (Observation) -> Unit) {
     val historyMonth = YearMonth.from(today())
     val months = remember(data.periods, data.gasappBills, data.samchullyBills, data.energyTalkBills, data.directBills, data.profile.providerId, historyMonth) { HistorySummary.through(data, historyMonth).dropWhile { it.usage == null && it.billedAmount == null }.dropLastWhile { it.usage == null && it.billedAmount == null } }
     var selectedMonth by rememberSaveable { mutableStateOf<String?>(null) }
     val selected = months.find { it.month.toString() == selectedMonth }
     val chartScroll = rememberScrollState(Int.MAX_VALUE)
-    LaunchedEffect(chartScroll.maxValue) { chartScroll.scrollTo(chartScroll.maxValue) }
+    // Land on the newest month once the bars have been measured. Re-running on every maxValue
+    // change pulled the view back while the user was looking at an earlier year.
+    var chartPlaced by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(chartScroll.maxValue) {
+        if (!chartPlaced && chartScroll.maxValue > 0) { chartScroll.scrollTo(chartScroll.maxValue); chartPlaced = true }
+    }
     Page {
         Title("사용 추이")
         if (months.isNotEmpty()) SurfaceCard {
@@ -792,6 +810,7 @@ private sealed interface Confirmation {
                             if (period.billMonth.isNotBlank()) Text("${period.billMonth.take(4)}.${period.billMonth.takeLast(2)} 청구", color = Muted, style = MaterialTheme.typography.bodySmall)
                         }
                     }
+                    if (period.manual) IconButton(onClick = { edit(period) }) { Icon(Icons.Outlined.EditNote, "이 사용 이력 수정") }
                     IconButton(onClick = { delete(period) }) { Icon(Icons.Outlined.DeleteOutline, "이 사용 이력 삭제") }
                 }
                 if (period.previous != null && period.current != null) Text("누적 지침 ${decimalText(period.previous)} → ${decimalText(period.current)}", color = Muted, style = MaterialTheme.typography.bodySmall)
@@ -967,13 +986,13 @@ private sealed interface Confirmation {
         dismissButton = { TextButton(onClick = close, enabled = !busy) { Text("나중에") } })
 }
 
-@Composable private fun HistoryDialog(busy: Boolean, close: () -> Unit, save: (String, String, String, (String?) -> Unit) -> Unit) {
+@Composable private fun HistoryDialog(busy: Boolean, editing: UsagePeriod? = null, close: () -> Unit, save: (String, String, String, (String?) -> Unit) -> Unit) {
     val month = YearMonth.from(today()).minusYears(1)
-    var start by rememberSaveable { mutableStateOf(month.atDay(1).toString()) }
-    var end by rememberSaveable { mutableStateOf(month.atEndOfMonth().toString()) }
-    var usage by rememberSaveable { mutableStateOf("") }
+    var start by rememberSaveable(editing) { mutableStateOf(editing?.start ?: month.atDay(1).toString()) }
+    var end by rememberSaveable(editing) { mutableStateOf(editing?.end ?: month.atEndOfMonth().toString()) }
+    var usage by rememberSaveable(editing) { mutableStateOf(editing?.let { decimalText(it.usage).replace(",", "") } ?: "") }
     var error by remember { mutableStateOf<String?>(null) }
-    AlertDialog(onDismissRequest = { if (!busy) close() }, title = { Text("과거 사용량 추가") },
+    AlertDialog(onDismissRequest = { if (!busy) close() }, title = { Text(if (editing != null) "사용 이력 수정" else "과거 사용량 추가") },
         text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("청구서의 사용 기간과 보정 전 사용량(m³)을 입력해 주세요. 지침이 있다면 당월 지침에서 전월 지침을 빼면 돼요.")
             OutlinedTextField(start, { start = it }, label = { Text("사용 시작일 YYYY-MM-DD") }, singleLine = true)

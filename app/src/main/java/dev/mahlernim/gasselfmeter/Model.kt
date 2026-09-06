@@ -22,6 +22,12 @@ data class UsagePeriod(
     val first: LocalDate get() = LocalDate.parse(start)
     val last: LocalDate get() = LocalDate.parse(end)
     val days: Long get() = ChronoUnit.DAYS.between(first, last) + 1
+    /**
+     * Typed in by the user rather than imported. There is no explicit source field; a row a
+     * supplier produced always carries that connection's meter key, while [addPeriod] leaves the
+     * default. Adding a real source column would need a storage revision, so this stands in.
+     */
+    val manual: Boolean get() = meter == "manual"
     fun validate() {
         require(days in 1..370 && first.year >= 2000 && last <= today()) { "사용 기간을 확인해 주세요. 미래 기간은 입력할 수 없어요." }
         require(usage.isFinite() && usage in 0.0..9_999_999.0) { "사용량을 확인해 주세요." }
