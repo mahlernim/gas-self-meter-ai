@@ -10,18 +10,14 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.work.*
-import java.time.Duration
-import java.time.ZonedDateTime
 import java.util.concurrent.TimeUnit
 
-private inline fun <reified T : ListenableWorker> daily(context: Context, name: String, enabled: Boolean, hour: Int, minute: Int = 0, network: Boolean = false) {
+private inline fun <reified T : ListenableWorker> daily(context: Context, name: String, enabled: Boolean, hour: Int, minute: Int = 0, network: Boolean = false, catchUpIfLate: Boolean = false) {
     val manager = WorkManager.getInstance(context)
     if (!enabled) { manager.cancelUniqueWork(name); return }
-    val now = ZonedDateTime.now(Korea)
-    var next = now.withHour(hour).withMinute(minute).withSecond(0).withNano(0)
-    if (next <= now) next = next.plusDays(1)
+    val delay = DailyWorkTiming.initialDelayMillis(System.currentTimeMillis(), hour, minute, catchUpIfLate)
     val request = PeriodicWorkRequestBuilder<T>(24, TimeUnit.HOURS)
-        .setInitialDelay(Duration.between(now, next).toMillis(), TimeUnit.MILLISECONDS)
+        .setInitialDelay(delay, TimeUnit.MILLISECONDS)
         .setConstraints(Constraints.Builder().apply { if (network) setRequiredNetworkType(NetworkType.CONNECTED) }.build()).build()
     val preferences = context.getSharedPreferences("work-schedules", Context.MODE_PRIVATE)
     val signature = "$hour/$minute"
@@ -69,7 +65,7 @@ object SubmissionScheduler {
             ((data.credentials != null && Providers.get(data.profile.providerId).passwordConnection) || data.gasappConnection != null || data.energyTalkConnection != null)
         WorkManager.getInstance(context).cancelUniqueWork("meter-auto-submit-now")
         daily<SubmissionWorker>(context, "meter-auto-submit", connected && data.submissionSettings.automatic &&
-            Providers.get(data.profile.providerId).automaticSubmission, 10, network = true)
+            Providers.get(data.profile.providerId).automaticSubmission, 10, network = true, catchUpIfLate = true)
         daily<SubmissionReminderWorker>(context, "meter-submission-reminder", connected && data.submissionSettings.reminder,
             data.submissionSettings.reminderHour, data.submissionSettings.reminderMinute, network = true)
         if (!data.submissionSettings.reminder) context.getSystemService(NotificationManager::class.java).cancel(3)
