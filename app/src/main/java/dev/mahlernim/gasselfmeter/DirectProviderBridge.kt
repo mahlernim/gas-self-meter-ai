@@ -3,7 +3,6 @@ package dev.mahlernim.gasselfmeter
 import android.content.Context
 import java.time.LocalDate
 import kotlin.concurrent.withLock
-import kotlin.math.floor
 
 /** Keeps a direct-provider session alive while the user chooses one of its contracts. */
 data class DirectLogin(val client: DirectProviderClient, val contracts: List<DirectContract>) : AutoCloseable {
@@ -82,11 +81,18 @@ object DirectProviderBridge {
         val currentTarget = target(providerId, snapshot)
         val reconciled = applyReconciliation(data, reconciledRecord(data, currentTarget))
         val directBills = (reconciled.directBills + snapshot.bills).associateBy { it.month }.values.sortedBy { it.month }.takeLast(120)
+        val meter = meterKey(providerId, snapshot.contract)
+        // A refresh of the same connection must not erase consent. A new connection, replacement
+        // meter, changed credentials or portable backup still needs a fresh opt-in.
+        val keepAutomatic = data.submissionSettings.automatic && data.ready && credentials != null &&
+            data.profile.providerId == providerId && data.profile.contract == contractKey &&
+            data.profile.meter == meter && data.credentials == credentials &&
+            data.gasappConnection == null && data.energyTalkConnection == null
         return reconciled.copy(
             profile = reconciled.profile.copy(providerId = providerId, contract = contractKey, customerNumber = snapshot.contract.id,
-                meter = meterKey(providerId, snapshot.contract), plannedDate = currentTarget?.end, syncTime = now),
+                meter = meter, plannedDate = currentTarget?.end, syncTime = now),
             periods = combined, credentials = credentials, ready = true, cachedSelfRead = currentTarget, directBills = directBills,
-            submissionSettings = reconciled.submissionSettings.copy(automatic = false),
+            submissionSettings = reconciled.submissionSettings.copy(automatic = keepAutomatic),
             gasappConnection = null, cachedGasappTarget = null, gasappBills = emptyList(), gasappMeterChangeObservedAt = null,
             samchullyBills = emptyList(), energyTalkConnection = null, energyTalkBills = emptyList(),
         )
@@ -130,7 +136,8 @@ object DirectProviderBridge {
         val initial = store.read()
         val providerId = initial.profile.providerId
         require(Providers.get(providerId).direct) { "공급사 연결 정보를 확인해 주세요." }
-        require(!automatic) { "이 공급사의 자가검침은 화면에서 확인 후 직접 제출해 주세요." }
+        check(!cancelled() && !initial.profile.reconnectRequired) { "공급사에 다시 연결한 뒤 확인해 주세요." }
+        if (automatic) require(initial.submissionSettings.automatic && Providers.get(providerId).automaticSubmission) { "자동 제출이 꺼져 있어요." }
         val credentials = initial.credentials ?: error("공급사 로그인 정보를 다시 입력해 주세요.")
         login(providerId, credentials).use { login ->
             val contract = login.contracts.singleOrNull { DirectIdentity.contract(providerId, it.id) == initial.profile.contract }
@@ -139,24 +146,29 @@ object DirectProviderBridge {
             val current = store.update { latest -> if (BackgroundState.sameAccount(latest, initial)) merge(latest, freshSnapshot, providerId, credentials) else latest }
             check(BackgroundState.sameAccount(current, initial)) { "확인한 계정이나 계량기가 바뀌었어요. 다시 확인해 주세요." }
             val currentTarget = current.cachedSelfRead
-            val decision = DirectSubmissionPolicy.decide(current, currentTarget, automatic = false)
+            val decision = DirectSubmissionPolicy.decide(current, currentTarget, automatic = automatic)
             require(decision.allowed && decision.value != null) { decision.reason }
             val selected = decision.value
             require(value == null || value == selected) { "확인 후 제출값이 달라졌어요. 화면에서 다시 확인해 주세요." }
             val target = currentTarget ?: error("현재 자가검침 대상을 찾지 못했어요.")
             val record = SubmissionRecord(target.cycle, target.start, target.end, selected, System.currentTimeMillis(), "pending", "공급사 확인 대기")
             store.update { latest ->
-                val fresh = DirectSubmissionPolicy.decide(latest, target, automatic = false)
+                val fresh = DirectSubmissionPolicy.decide(latest, target, automatic = automatic)
                 check(!cancelled() && BackgroundState.sameAccount(latest, current) && fresh.allowed && fresh.value == selected) { "제출 조건이 변경됐어요. 다시 확인해 주세요." }
                 latest.copy(submissions = (latest.submissions.filterNot { it.cycle == target.cycle } + record).takeLast(100))
             }
-            if (cancelled()) return@withLock store.update { latest -> BackgroundState.finish(latest, current, record.copy(status = "rejected", detail = "제출 조건이 변경되어 전송하지 않았어요.")) }
+            // Consent, record ownership and policy are checked once more at the network boundary.
+            if (cancelled() || !DirectSubmissionPolicy.canSendPending(store.read(), current, target, record, automatic)) {
+                return@withLock store.update { latest -> BackgroundState.finish(latest, current,
+                    record.copy(status = "rejected", detail = "제출 조건이 변경되어 전송하지 않았어요.")) }
+            }
             val result = try {
                 login.client.submit(freshSnapshot.contract, target, selected)
                 val refreshed = snapshot(login, freshSnapshot.contract)
                 val actual = target(providerId, refreshed)
                 val confirmed = actual != null && actual.submitted && actual.submittedValue == selected &&
-                    actual.cycle == target.cycle && actual.contract == target.contract && actual.installation == target.installation
+                    actual.cycle == target.cycle && actual.start == target.start && actual.end == target.end &&
+                    actual.contract == target.contract && actual.installation == target.installation
                 Triple(if (confirmed) "confirmed" else "uncertain", actual, if (confirmed) "공급사에서 제출 완료를 확인했어요." else "전송 결과를 확인 중이에요. 공급사에서 제출 결과를 다시 확인해 주세요.")
             } catch (_: Exception) {
                 Triple("uncertain", null, "전송 결과를 확인 중이에요. 공급사에서 제출 결과를 다시 확인해 주세요.")
@@ -168,29 +180,5 @@ object DirectProviderBridge {
                 }
             }
         }
-    }
-}
-
-object DirectSubmissionPolicy {
-    fun decide(data: AppData, target: SelfReadTarget?, time: Long = System.currentTimeMillis(), automatic: Boolean = false): SubmissionDecision {
-        fun deny(reason: String) = SubmissionDecision(false, null, reason)
-        if (!Providers.get(data.profile.providerId).direct) return deny("공급사 연결 정보를 확인해 주세요.")
-        if (automatic) return deny("이 공급사의 자가검침은 화면에서 확인 후 직접 제출해 주세요.")
-        if (data.profile.meter == DirectIdentity.meter(data.profile.providerId, data.profile.customerNumber, null))
-            return deny("공급사에서 계량기 정보를 확인하지 못했어요. 실제 숫자를 직접 기록해 주세요.")
-        if (target == null || target.contract.bp != data.profile.customerNumber || target.contract.ca != data.profile.providerId ||
-            DirectIdentity.contract(data.profile.providerId, target.contract.bp) != data.profile.contract || target.installation != data.profile.meter)
-            return deny("계약 또는 계량기 정보가 달라요. 다시 조회해 주세요.")
-        if (!target.eligible || target.submitted) return deny("이번 검침 대상 상태를 공급사에서 다시 확인해 주세요.")
-        if (target.previousValue == null || !target.previousValue.isFinite()) return deny("공급사의 이전 검침값을 확인하지 못했어요.")
-        val date = dateOf(time)
-        if (date !in LocalDate.parse(target.start)..LocalDate.parse(target.end)) return deny("자가검침 입력 기간이 아니에요.")
-        if (data.submissions.any { it.cycle == target.cycle && it.status in setOf("pending", "uncertain", "confirmed") }) return deny("이전 전송 결과를 먼저 확인해 주세요.")
-        val observed = data.observations.lastOrNull { it.meter == data.profile.meter && it.time <= time }
-            ?: return deny("실제 계량기 숫자를 먼저 확인해 주세요.")
-        val sameDay = data.observations.lastOrNull { it.meter == data.profile.meter && it.time <= time && dateOf(it.time) == date }
-        val reading = floor(sameDay?.reading ?: (Estimator.estimate(data, time).reading ?: return deny("제출할 지침을 계산할 수 없어요.")))
-        if (!reading.isFinite() || reading !in 0.0..99_999_999.0 || reading < target.previousValue) return deny("이전 지침과 제출값을 확인해 주세요.")
-        return SubmissionDecision(true, reading, "검침 기간과 기존 제출 여부를 확인했어요.")
     }
 }

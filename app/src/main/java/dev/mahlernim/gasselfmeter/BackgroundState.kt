@@ -15,13 +15,9 @@ internal object BackgroundState {
             a.account.customer == b.account.customer && a.account.contract == b.account.contract
     }
 
-    /**
-     * A supplier rejecting the stored credentials is permanent until the user reconnects. Retrying
-     * it replays the same password on every backoff and every later period, so these are separated
-     * from transient network, timeout and server failures, which stay retryable.
-     */
+    /** A rejected password or expired service session requires reconnection, not repeated login. */
     fun rejectedCredentials(error: Throwable): Boolean = when (error) {
-        is GasappAuthExpired -> true
+        is GasappAuthExpired, is EnergyTalkAuthException -> true
         is ProviderFailure -> error.category == "authentication"
         else -> false
     }
