@@ -94,6 +94,7 @@ class SubmissionWorker(context: Context, params: WorkerParameters) : Worker(cont
             var data = try { store.read() } catch (_: Exception) { return Result.failure() }
             if (data.profile.reconnectRequired) return Result.success()
             if (data.gasappConnection != null) return GasappBackground.automatic(applicationContext, this)
+            if (Providers.get(data.profile.providerId).direct) return DirectBackground.automatic(applicationContext, this)
             val expected = data
             val credentials = data.credentials ?: return Result.success()
             if (!data.submissionSettings.automatic || !Providers.get(data.profile.providerId).automaticSubmission) return Result.success()

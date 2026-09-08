@@ -43,7 +43,7 @@ class ProviderCatalogTest {
             assertEquals(id, provider.id)
             assertEquals(regions, provider.regions)
             assertEquals(id == "daesungclean", provider.automatic)
-            assertFalse(provider.automaticSubmission)
+            assertEquals(id == "daesungclean", provider.automaticSubmission)
             assertFalse(provider.gasapp)
             assertEquals(id == "daesungclean", provider.passwordConnection)
             assertNull(provider.skensCode)
@@ -72,13 +72,14 @@ class ProviderCatalogTest {
         assertEquals("공급사 홈페이지", Providers.get("mcenergy").websiteLabel)
     }
 
-    @Test fun automaticSubmissionCoversSharedSkensAndGasappClientsOnly() {
+    @Test fun automaticSubmissionCoversSkensGasappAndDirectPasswordClientsOnly() {
         val gasapp = setOf("seoul", "yesco", "incheon", "daeryun", "kiturami", "jb", "jeonbukgas",
             "gunsan", "jeju", "kyungdong", "chambit", "mcenergy", "seohae", "daehwa")
         val skens = setOf("busan", "koone", "cheongju", "gumi", "pohang", "jeonnam", "gangwon", "jeonbuk")
+        val direct = setOf("daesung", "daesungclean", "haeyang")
         assertEquals(gasapp, Providers.all.filter { it.gasapp }.map { it.id }.toSet())
-        assertEquals(skens + gasapp + setOf("samchully", "daesung", "daesungclean", "haeyang"), Providers.all.filter { it.automatic }.map { it.id }.toSet())
-        assertEquals(gasapp + skens, Providers.all.filter { it.automaticSubmission }.map { it.id }.toSet())
-        assertEquals(skens + setOf("samchully", "daesung", "daesungclean", "haeyang"), Providers.all.filter { it.passwordConnection }.map { it.id }.toSet())
+        assertEquals(skens + gasapp + direct + "samchully", Providers.all.filter { it.automatic }.map { it.id }.toSet())
+        assertEquals(gasapp + skens + direct, Providers.all.filter { it.automaticSubmission }.map { it.id }.toSet())
+        assertEquals(skens + direct + "samchully", Providers.all.filter { it.passwordConnection }.map { it.id }.toSet())
     }
 }

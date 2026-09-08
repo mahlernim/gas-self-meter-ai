@@ -1,0 +1,115 @@
+name: Release readiness
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'app/**'
+      - 'scripts/play-*.ps1'
+      - '.github/workflows/release-check.yml'
+  pull_request:
+    paths:
+      - 'app/**'
+      - 'scripts/play-*.ps1'
+      - '.github/workflows/release-check.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: release-readiness-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  release-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+      - run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Check minified release and compile instrumentation tests
+        run: chmod +x gradlew && ./gradlew :app:bundleRelease :app:assembleDebugAndroidTest --console=plain
+      - name: Record source and unsigned artifact provenance
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, pathlib, re, subprocess
+          p = pathlib.Path('app/build/outputs/bundle/release/app-release.aab')
+          gradle = pathlib.Path('app/build.gradle.kts').read_text()
+          metadata = {
+              'packageName': 'dev.mahlernim.gasselfmeter',
+              'versionName': re.search(r'versionName\s*=\s*"([^"]+)"', gradle)[1],
+              'versionCode': re.search(r'versionCode\s*=\s*(\d+)', gradle)[1],
+              'revision': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
+              'sha256': hashlib.sha256(p.read_bytes()).hexdigest(),
+              'signed': False,
+              'playSubmitted': False
+          }
+          p.with_name('unsigned-build.json').write_text(json.dumps(metadata, indent=2) + '\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-release-candidate
+          path: |
+            app/build/outputs/bundle/release/app-release.aab
+            app/build/outputs/bundle/release/unsigned-build.json
+          retention-days: 14
+  synthetic-android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Prepare API 35 virtual device
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo chmod 666 /dev/kvm
+          sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'emulator' 'system-images;android-35;google_apis;x86_64'
+          # avdmanager and newer emulators can otherwise resolve different default homes.
+          export ANDROID_USER_HOME="$RUNNER_TEMP/android-user"
+          export ANDROID_AVD_HOME="$RUNNER_TEMP/android-avd"
+          mkdir -p "$ANDROID_USER_HOME" "$ANDROID_AVD_HOME"
+          echo "ANDROID_USER_HOME=$ANDROID_USER_HOME" >> "$GITHUB_ENV"
+          echo "ANDROID_AVD_HOME=$ANDROID_AVD_HOME" >> "$GITHUB_ENV"
+          echo no | avdmanager create avd --force --name gas-synthetic --path "$ANDROID_AVD_HOME/gas-synthetic.avd" --package 'system-images;android-35;google_apis;x86_64'
+          "$ANDROID_HOME/emulator/emulator" -list-avds
+          "$ANDROID_HOME/emulator/emulator" -avd gas-synthetic -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -camera-back none -camera-front none > /tmp/gas-emulator.log 2>&1 &
+          emulator_pid=$!
+          adb start-server
+          booted=false
+          for attempt in $(seq 1 120); do
+            if ! kill -0 "$emulator_pid" 2>/dev/null; then cat /tmp/gas-emulator.log; exit 1; fi
+            if adb shell getprop sys.boot_completed 2>/dev/null | grep -q 1; then booted=true; break; fi
+            sleep 2
+          done
+          if [ "$booted" != true ]; then cat /tmp/gas-emulator.log; exit 1; fi
+          adb shell input keyevent 82
+          adb shell settings put global window_animation_scale 0
+          adb shell settings put global transition_animation_scale 0
+          adb shell settings put global animator_duration_scale 0
+      - name: Run fake-provider storage and submission flows
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=dev.mahlernim.gasselfmeter.DirectAutomaticFlowTest,dev.mahlernim.gasselfmeter.DirectBridgeFlowTest --console=plain
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: synthetic-android-reports
+          path: |
+            app/build/reports/androidTests/
+            app/build/outputs/androidTest-results/
+            /tmp/gas-emulator.log
+          retention-days: 14
