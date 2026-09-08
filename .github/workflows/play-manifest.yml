@@ -1,0 +1,18 @@
+name: Play release manifest
+on:
+  push:
+    branches: [main]
+    paths: ['scripts/prepare-play-release*.mjs', 'release-notes/**', '.github/workflows/play-manifest.yml']
+  pull_request:
+    paths: ['scripts/prepare-play-release*.mjs', 'release-notes/**', '.github/workflows/play-manifest.yml']
+permissions:
+  contents: read
+jobs:
+  manifest-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: node --test scripts/prepare-play-release.test.mjs
