@@ -102,7 +102,7 @@ class SubmissionPolicyTest {
         val koone = data().copy(profile = data().profile.copy(providerId = "koone",
             contract = SkensClient.contractKey(Providers.skens("koone"), target.contract)))
         assertTrue(SubmissionPolicy.decide(koone, target, time, automatic = false).allowed)
-        assertFalse(SubmissionPolicy.decide(koone, target, time, automatic = true).allowed)
+        assertTrue(SubmissionPolicy.decide(koone, target, time, automatic = true).allowed)
         val seoul = data().copy(profile = data().profile.copy(providerId = "seoul"))
         assertFalse(SubmissionPolicy.decide(seoul, target, time, automatic = false).allowed)
     }
@@ -149,5 +149,89 @@ class SubmissionPolicyTest {
             confirmed.copy(installation = "replacement")
         )
         unconfirmed.forEach { assertFalse(SkensClient.confirmsSubmission(target, it, 108.0)) }
+    }
+
+    private val skensIds = listOf("busan", "koone", "cheongju", "gumi", "pohang", "jeonnam", "gangwon", "jeonbuk")
+
+    private fun providerData(id: String, lastCheckDaysAgo: Long = 1): AppData = data(lastCheckDaysAgo).let { original ->
+        original.copy(profile = original.profile.copy(providerId = id,
+            contract = SkensClient.contractKey(Providers.skens(id), target.contract)))
+    }
+
+    @Test fun allEightSkensProvidersUseTheOptInPolicyWithoutChangingDefaults() {
+        assertFalse(SubmissionSettings().automatic)
+        for (id in skensIds) {
+            val current = providerData(id)
+            assertTrue(id, Providers.get(id).automaticSubmission)
+            assertTrue(id, Providers.get(id).passwordConnection)
+            assertTrue(id, SubmissionPolicy.decide(current, target, time, true).allowed)
+            assertTrue(id, SubmissionPolicy.decide(current, target, time, false).allowed)
+            val disabled = current.copy(submissionSettings = current.submissionSettings.copy(automatic = false))
+            assertFalse(id, SubmissionPolicy.decide(disabled, target, time, true).allowed)
+            assertTrue(id, SubmissionPolicy.decide(disabled, target, time, false).allowed)
+            assertFalse(id, SubmissionPolicy.decide(current.copy(credentials = null), target, time, true).allowed)
+        }
+    }
+
+    @Test fun everySkensProviderStillRequiresFreshMatchingRuntimeEligibility() {
+        for (id in skensIds) {
+            val current = providerData(id)
+            assertFalse(id, SubmissionPolicy.decide(current, null, time, true).allowed)
+            val invalidTargets = listOf(
+                target.copy(eligible = false), target.copy(submitted = true, submittedValue = 108.0),
+                target.copy(previousValue = null), target.copy(previousValue = Double.NaN),
+                target.copy(previousValue = 999.0), target.copy(serial = "replacement"),
+                target.copy(contract = target.contract.copy(ca = "different")),
+                target.copy(contract = target.contract.copy(bp = "different")),
+            )
+            invalidTargets.forEach { invalid ->
+                assertFalse("$id: $invalid", SubmissionPolicy.decide(current, invalid, time, true).allowed)
+            }
+            assertFalse(id, SubmissionPolicy.decide(current.copy(observations = emptyList()), target, time, true).allowed)
+            assertFalse(id, SubmissionPolicy.decide(providerData(id, 8), target, time, true).allowed)
+            assertFalse(id, SubmissionPolicy.decide(providerData(id, -1), target, time, true).allowed)
+        }
+    }
+
+    @Test fun allSkensDeadlinesUseKoreanCalendarBoundaries() {
+        val midnight = dayStart(date)
+        for (id in skensIds) {
+            val current = providerData(id)
+            assertFalse(id, SubmissionPolicy.decide(current, target, midnight - 1, true).allowed)
+            assertTrue(id, SubmissionPolicy.decide(current, target, midnight, true).allowed)
+            assertTrue(id, SubmissionPolicy.decide(current, target, midnight + 86_400_000 - 1, true).allowed)
+            assertFalse(id, SubmissionPolicy.decide(current, target, midnight + 86_400_000, true).allowed)
+        }
+    }
+
+    @Test fun previousAttemptBlocksAutomaticSubmissionForEverySkensProviderAfterReload() {
+        for (id in skensIds) for (status in listOf("pending", "uncertain", "confirmed", "rejected")) {
+            val record = SubmissionRecord(target.cycle, target.start, target.end, 108.0, time - 1000, status, "synthetic")
+            val original = providerData(id).copy(submissions = listOf(record))
+            val restored = DataCodec.decode(DataCodec.encode(original, true), true)
+            assertFalse("$id: $status", SubmissionPolicy.decide(restored, target, time, true).allowed)
+        }
+    }
+
+    @Test fun providerExpansionDoesNotOptInExistingOrRestoredProfiles() {
+        for (id in skensIds) {
+            val enabled = providerData(id)
+            val disabled = enabled.copy(submissionSettings = enabled.submissionSettings.copy(automatic = false))
+            val local = DataCodec.decode(DataCodec.encode(disabled, true), true)
+            assertFalse(id, local.submissionSettings.automatic)
+            val portable = DataCodec.decode(DataCodec.encode(enabled))
+            assertFalse(id, portable.submissionSettings.automatic)
+            assertNull(portable.credentials)
+            assertFalse(id, SubmissionPolicy.decide(portable, target, time, true).allowed)
+        }
+    }
+
+    @Test fun equalCustomerNumbersNeverShareContractIdentityAcrossSkensCompanies() {
+        assertEquals(skensIds.size, skensIds.map { providerData(it).profile.contract }.toSet().size)
+        for (id in skensIds) for (other in skensIds.filter { it != id }) {
+            val wrongCompany = providerData(id).copy(profile = providerData(id).profile.copy(
+                contract = providerData(other).profile.contract))
+            assertFalse("$id vs $other", SubmissionPolicy.decide(wrongCompany, target, time, true).allowed)
+        }
     }
 }

@@ -72,13 +72,13 @@ class ProviderCatalogTest {
         assertEquals("공급사 홈페이지", Providers.get("mcenergy").websiteLabel)
     }
 
-    @Test fun catalogExpansionDoesNotChangeExistingConnectionOrSubmissionCapabilities() {
+    @Test fun automaticSubmissionCoversSharedSkensAndGasappClientsOnly() {
         val gasapp = setOf("seoul", "yesco", "incheon", "daeryun", "kiturami", "jb", "jeonbukgas",
             "gunsan", "jeju", "kyungdong", "chambit", "mcenergy", "seohae", "daehwa")
         val skens = setOf("busan", "koone", "cheongju", "gumi", "pohang", "jeonnam", "gangwon", "jeonbuk")
         assertEquals(gasapp, Providers.all.filter { it.gasapp }.map { it.id }.toSet())
         assertEquals(skens + gasapp + setOf("samchully", "daesung", "daesungclean", "haeyang"), Providers.all.filter { it.automatic }.map { it.id }.toSet())
-        assertEquals(gasapp + "busan", Providers.all.filter { it.automaticSubmission }.map { it.id }.toSet())
+        assertEquals(gasapp + skens, Providers.all.filter { it.automaticSubmission }.map { it.id }.toSet())
         assertEquals(skens + setOf("samchully", "daesung", "daesungclean", "haeyang"), Providers.all.filter { it.passwordConnection }.map { it.id }.toSet())
     }
 }
