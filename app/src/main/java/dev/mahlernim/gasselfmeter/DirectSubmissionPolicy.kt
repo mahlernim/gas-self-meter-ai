@@ -10,6 +10,9 @@ object DirectSubmissionPolicy {
         val provider = Providers.get(data.profile.providerId)
         val settings = data.submissionSettings
         if (!provider.direct || data.profile.reconnectRequired) return deny("공급사 연결 정보를 확인해 주세요.")
+        // Match the existing client's range before saving pending. A local validation failure
+        // must not unnecessarily become an uncertain network attempt.
+        val maximumReading = if (provider.id == "haeyang") 99_999_999.0 else 99_999.0
         if (automatic && (!data.ready || !settings.automatic || !provider.automaticSubmission)) return deny("마지막 날 자동 제출이 꺼져 있어요.")
         if (automatic && data.credentials == null) return deny("자동 제출에 필요한 로그인 정보를 저장해 주세요.")
         if (data.profile.meter == DirectIdentity.meter(data.profile.providerId, data.profile.customerNumber, null))
@@ -18,7 +21,7 @@ object DirectSubmissionPolicy {
             DirectIdentity.contract(data.profile.providerId, target.contract.bp) != data.profile.contract || target.installation != data.profile.meter)
             return deny("계약 또는 계량기 정보가 달라요. 다시 조회해 주세요.")
         if (!target.eligible || target.submitted) return deny("이번 검침 대상 상태를 공급사에서 다시 확인해 주세요.")
-        if (target.previousValue == null || !target.previousValue.isFinite() || target.previousValue !in 0.0..99_999_999.0)
+        if (target.previousValue == null || !target.previousValue.isFinite() || target.previousValue !in 0.0..maximumReading)
             return deny("공급사의 이전 검침값을 확인하지 못했어요.")
         val date = dateOf(time)
         val start = LocalDate.parse(target.start)
@@ -36,7 +39,7 @@ object DirectSubmissionPolicy {
             return deny("마지막 실측 확인이 ${age}일 전이에요. ${settings.recentDays}일 이내에 다시 확인해 주세요.")
         val reading = floor((if (!automatic && dateOf(observed.time) == date) observed.reading else Estimator.estimate(data, time).reading)
             ?: return deny("제출할 지침을 계산할 수 없어요."))
-        if (!reading.isFinite() || reading !in 0.0..99_999_999.0 || reading < target.previousValue)
+        if (!reading.isFinite() || reading !in 0.0..maximumReading || reading < target.previousValue)
             return deny("이전 지침과 제출값을 확인해 주세요.")
         return SubmissionDecision(true, reading, if (automatic) "오늘은 검침 기간 마지막 날이며, 마지막 실측 확인이 ${age}일 전이에요."
             else "검침 기간과 기존 제출 여부를 확인했어요.")
