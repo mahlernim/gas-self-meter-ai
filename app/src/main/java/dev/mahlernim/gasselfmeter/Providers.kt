@@ -37,6 +37,9 @@ data class Provider(
 object Providers {
     // Public company directory checked 2026-09-04. Catalog inclusion is not API verification.
     private const val directory = "https://www.kogas.or.kr/site/koGas/1020408040000"
+    // SK E&S automatic submission is an opt-in alpha capability of the existing shared client,
+    // not a claim of live-account verification. SubmissionPolicy still requires a fresh matching
+    // contract/meter/window, an eligible target, physical observations and no previous attempt.
     val all = listOf(
         Provider("busan", "부산도시가스", listOf("부산"), "https://www.skens.com/busan/login/login.do", true, skensCode = "C000", automaticSubmission = true),
         Provider("seoul", "서울도시가스", listOf("서울", "경기"), "https://www.seoulgas.co.kr/", automatic = true, gasapp = true, automaticSubmission = true),
@@ -45,13 +48,13 @@ object Providers {
         Provider("incheon", "인천도시가스", listOf("인천", "경기"), "https://icgas.co.kr:8443/", automatic = true, gasapp = true, automaticSubmission = true),
         Provider("daeryun", "대륜E&S", listOf("서울", "경기"), "https://www.daeryunens.com/", automatic = true, gasapp = true, automaticSubmission = true),
         Provider("kiturami", "귀뚜라미에너지", listOf("서울"), "https://www.kituramienergy.co.kr/", automatic = true, gasapp = true, automaticSubmission = true),
-        Provider("koone", "코원에너지서비스", listOf("서울", "경기"), "https://www.skens.com/koone/login/login.do", true, skensCode = "B000"),
-        Provider("cheongju", "충청에너지서비스", listOf("충북", "세종"), "https://www.skens.com/cheongju/login/login.do", true, skensCode = "D000"),
-        Provider("gumi", "영남에너지서비스 구미", listOf("경북"), "https://www.skens.com/gumi/login/login.do", true, skensCode = "E000"),
-        Provider("pohang", "영남에너지서비스 포항", listOf("경북"), "https://www.skens.com/pohang/login/login.do", true, skensCode = "F000"),
-        Provider("jeonnam", "전남도시가스", listOf("전남"), "https://www.skens.com/jeonnam/login/login.do", true, skensCode = "G000"),
-        Provider("gangwon", "강원도시가스", listOf("강원"), "https://www.skens.com/gangwon/login/login.do", true, skensCode = "J000"),
-        Provider("jeonbuk", "전북에너지서비스", listOf("전북"), "https://www.skens.com/jeonbuk/login/login.do", true, skensCode = "K000"),
+        Provider("koone", "코원에너지서비스", listOf("서울", "경기"), "https://www.skens.com/koone/login/login.do", true, skensCode = "B000", automaticSubmission = true),
+        Provider("cheongju", "충청에너지서비스", listOf("충북", "세종"), "https://www.skens.com/cheongju/login/login.do", true, skensCode = "D000", automaticSubmission = true),
+        Provider("gumi", "영남에너지서비스 구미", listOf("경북"), "https://www.skens.com/gumi/login/login.do", true, skensCode = "E000", automaticSubmission = true),
+        Provider("pohang", "영남에너지서비스 포항", listOf("경북"), "https://www.skens.com/pohang/login/login.do", true, skensCode = "F000", automaticSubmission = true),
+        Provider("jeonnam", "전남도시가스", listOf("전남"), "https://www.skens.com/jeonnam/login/login.do", true, skensCode = "G000", automaticSubmission = true),
+        Provider("gangwon", "강원도시가스", listOf("강원"), "https://www.skens.com/gangwon/login/login.do", true, skensCode = "J000", automaticSubmission = true),
+        Provider("jeonbuk", "전북에너지서비스", listOf("전북"), "https://www.skens.com/jeonbuk/login/login.do", true, skensCode = "K000", automaticSubmission = true),
         Provider("jb", "JB", listOf("충남", "세종"), "https://www.jbcorporation.com/", automatic = true, gasapp = true, automaticSubmission = true),
         Provider("jeonbukgas", "전북도시가스", listOf("전북"), "https://www.jbcitygas.co.kr/", automatic = true, gasapp = true, automaticSubmission = true),
         Provider("gunsan", "군산도시가스", listOf("전북"), "https://www.kscg.co.kr/", automatic = true, gasapp = true, automaticSubmission = true),
