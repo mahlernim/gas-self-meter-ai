@@ -117,4 +117,20 @@ class SamchullyBridgeTest {
         assertNull(SamchullyBridge.reconciledRecord(data.copy(profile = data.profile.copy(contract = "other-contract")), target))
         assertNull(SamchullyBridge.reconciledRecord(data, target.copy(cycle = "other-cycle")))
     }
+
+    @Test fun changedFreshTargetOrCancellationStopsBeforeRegistration() {
+        val target = SamchullyBridge.selfReadTarget(contract, SamchullySelfReadState(
+            "2026-09-01", "2026-09-30", "target-1", 120.0, false, null, null,
+        ))!!
+        val initial = AppData(profile = Profile(providerId = "samchully", contract = contract.key,
+            customerNumber = contract.customerNo, meter = target.installation), ready = true,
+            observations = listOf(Observation(now, 121.0, target.installation)))
+        val record = SubmissionRecord(target.cycle, target.start, target.end, 121.0, now, "pending", "대기")
+        val latest = initial.copy(submissions = listOf(record))
+        assertTrue(SamchullyBridge.canRegister(initial, latest, record, target, target, 121.0, false, time = now) { false })
+        assertFalse(SamchullyBridge.canRegister(initial, latest, record, target, target.copy(serial = "target-2"), 121.0, false, time = now) { false })
+        assertFalse(SamchullyBridge.canRegister(initial, latest, record, target, target, 121.0, false, time = now) { true })
+        assertFalse(SamchullyBridge.canRegister(initial, latest.copy(observations = listOf(Observation(now, 122.0, target.installation))),
+            record, target, target, 121.0, false, time = now) { false })
+    }
 }

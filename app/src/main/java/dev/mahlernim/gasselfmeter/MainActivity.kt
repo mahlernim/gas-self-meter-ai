@@ -97,7 +97,7 @@ class MainActivity : ComponentActivity() {
         // Left on the default the icons turn light in system dark mode and vanish on the background.
         val bars = SystemBarStyle.light(Color.Transparent.toArgb(), Color.Transparent.toArgb())
         enableEdgeToEdge(statusBarStyle = bars, navigationBarStyle = bars)
-        destination = tabOf(intent)
+        destination = takeDestination(intent)
         setContent {
             MaterialTheme(colorScheme = lightColorScheme(primary = Teal, onPrimary = Color.White,
                 primaryContainer = Pale, onPrimaryContainer = DeepTeal, secondary = Coral,
@@ -112,11 +112,15 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        destination = tabOf(intent)
+        destination = takeDestination(intent)
     }
 
-    private fun tabOf(intent: Intent?): Int? =
-        intent?.getIntExtra(AppTabs.EXTRA, -1)?.takeIf { it in AppTabs.METER..AppTabs.SUBMISSION }
+    private fun takeDestination(intent: Intent?): Int? {
+        val destination = intent?.getIntExtra(AppTabs.EXTRA, -1)
+            ?.takeIf { it in AppTabs.METER..AppTabs.SUBMISSION }
+        intent?.removeExtra(AppTabs.EXTRA)
+        return destination
+    }
 }
 
 /** Deletion targets travel as values so a concurrent sync cannot shift what the dialog removes. */

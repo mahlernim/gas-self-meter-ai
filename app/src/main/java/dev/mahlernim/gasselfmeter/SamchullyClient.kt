@@ -50,6 +50,9 @@ data class SamchullySelfReadState(
     val submittedDate: String?,
 )
 
+/** A submission stopped before the registration request was sent. */
+internal class SamchullyNoWriteException(cause: Throwable? = null) : Exception(cause)
+
 /**
  * Samchully customer-center contract. Submission is limited to the explicitly
  * allowlisted validation and self-reading endpoints, each sent as one-shot.
@@ -127,7 +130,12 @@ class SamchullyReadClient internal constructor(
         parseSelfReadState(period, target, recent)
     }
 
-    fun validateAndSubmit(contract: SamchullyContract, targetId: String, value: Double) = atStage("submit") {
+    fun validateAndSubmit(
+        contract: SamchullyContract,
+        targetId: String,
+        value: Double,
+        canRegister: () -> Boolean = { true },
+    ) = atStage("submit") {
         requireCustomerNo(contract.customerNo)
         require(targetId.length in 1..100 && targetId.none(Char::isISOControl)) { "삼천리 검침 대상 정보를 확인해 주세요." }
         require(value.isFinite() && value in 0.0..99_999_999.0) { "제출할 검침값을 확인해 주세요." }
@@ -137,11 +145,16 @@ class SamchullyReadClient internal constructor(
             put("I_TIDNR", targetId)
             put("I_ROLGB", "MI")
         }
-        writePost("scl/services/validation-tidnr", JSONObject(base.toString()).put("I_GUBUN", "1"))
-        writePost("scl/services/validation-tidnr", JSONObject(base.toString()).apply {
-            put("I_GUBUN", "2")
-            put("I_ZWSTAND", reading)
-        })
+        preflight {
+            requirePreflightSuccess(writePost("scl/services/validation-tidnr", JSONObject(base.toString()).put("I_GUBUN", "1")))
+        }
+        preflight {
+            requirePreflightSuccess(writePost("scl/services/validation-tidnr", JSONObject(base.toString()).apply {
+                put("I_GUBUN", "2")
+                put("I_ZWSTAND", reading)
+            }))
+        }
+        if (!canRegister()) throw SamchullyNoWriteException()
         val submitted = writePost("scl/services/self-meter-img", JSONObject().apply {
             put("I_VKONT", contract.customerNo)
             put("I_TIDNR", targetId)
@@ -151,6 +164,20 @@ class SamchullyReadClient internal constructor(
         })
         check(submitted.optString("E_RETCD") == "S") {
             submitted.optString("E_RETMG").takeIf(String::isNotBlank) ?: "삼천리 검침값을 접수하지 못했어요. 잠시 후 다시 확인해 주세요."
+        }
+    }
+
+    private inline fun preflight(action: () -> Unit) {
+        try {
+            action()
+        } catch (failure: Exception) {
+            throw SamchullyNoWriteException(failure)
+        }
+    }
+
+    private fun requirePreflightSuccess(response: JSONObject) {
+        check(response.optString("E_RETCD") == "S") {
+            response.optString("E_RETMG").takeIf(String::isNotBlank) ?: "삼천리 검침 조건을 확인하지 못했어요."
         }
     }
 
@@ -204,6 +231,8 @@ class SamchullyReadClient internal constructor(
 
     private inline fun <T> atStage(stage: String, action: () -> T): T = try {
         action()
+    } catch (failure: SamchullyNoWriteException) {
+        throw failure
     } catch (failure: ProviderFailure) {
         throw failure
     } catch (failure: Exception) {

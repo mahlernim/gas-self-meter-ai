@@ -29,13 +29,13 @@ class EnergyTalkIntegrationTest {
 
     @Test fun retryAfterResponseDoesNotReplaySubmission() = runBlocking {
         MockWebServer().use { server ->
-            server.enqueue(MockResponse().setBody("""{"responseCode":"ok","clientId":"cncity"}"""))
+            server.enqueue(MockResponse().setBody("""{"responseCode":"ok","clientId":"cncity","address":"합성 주소"}"""))
             server.enqueue(MockResponse().setResponseCode(503).setHeader("Retry-After", "0"))
             server.enqueue(MockResponse().setBody("""{"responseCode":"ok"}"""))
             val transport = OkHttpClient.Builder().addInterceptor { chain ->
                 chain.proceed(chain.request().newBuilder().url(server.url(chain.request().url.encodedPath)).build())
             }.build()
-            try { EnergyTalkReadClient(transport).submitReading(connection.session, connection.tenant, 110.0); fail("503 accepted") }
+            try { EnergyTalkReadClient(transport).submitReading(connection.session, connection.tenant, "합성 주소", 110.0); fail("503 accepted") }
             catch (_: IllegalStateException) { }
             assertEquals(2, server.requestCount)
             assertEquals("/api/fetch", server.takeRequest().path)

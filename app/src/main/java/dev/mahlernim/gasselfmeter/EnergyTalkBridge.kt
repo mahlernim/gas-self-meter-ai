@@ -53,7 +53,7 @@ object EnergyTalkBridge {
             require(value == null || value == decision.value) { "확인 후 제출값이 달라졌어요. 화면에서 다시 확인해 주세요." }
             decision.value
         }
-        val check = runBlocking { client.checkReading(connection.session, connection.tenant, selected) }
+        val check = runBlocking { client.checkReading(connection.session, connection.tenant, target.address, selected) }
         require(check.allowed) { check.message ?: "이 검침값은 입력할 수 없어요." }
         val record = SubmissionRecord(target.cycle, target.start, target.end, selected, System.currentTimeMillis(), "pending", "공급사 확인 대기")
         store.update { latest ->
@@ -69,7 +69,13 @@ object EnergyTalkBridge {
             }) }
         }
         try {
-            runBlocking { client.submitReading(connection.session, connection.tenant, selected) }
+            runBlocking {
+                client.submitReading(connection.session, connection.tenant, target.address, selected) {
+                    val latest = store.read()
+                    !cancelled() && sameConnection(initial, latest) &&
+                        latest.submissions.lastOrNull { it.cycle == record.cycle } == record
+                }
+            }
             val refreshed = runBlocking { client.verifyAndRead(connection.session, connection.tenant) }
             val actual = target(connection, refreshed)
             val confirmed = EnergyTalkSubmissionPolicy.confirms(target, actual, selected)

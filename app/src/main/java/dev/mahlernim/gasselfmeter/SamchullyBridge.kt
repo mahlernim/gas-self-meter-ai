@@ -123,6 +123,28 @@ object SamchullyBridge {
         })
     }
 
+    internal fun canRegister(
+        initial: AppData,
+        latest: AppData,
+        record: SubmissionRecord,
+        target: SelfReadTarget,
+        freshTarget: SelfReadTarget?,
+        selected: Double,
+        automatic: Boolean,
+        time: Long = System.currentTimeMillis(),
+        cancelled: () -> Boolean,
+    ): Boolean {
+        val fresh = freshTarget ?: return false
+        val current = latest.copy(submissions = latest.submissions.filterNot { it == record })
+        val decision = SamchullySubmissionPolicy.decide(current, fresh, time, automatic)
+        return !cancelled() && BackgroundState.sameAccount(latest, initial) &&
+            latest.submissions.lastOrNull { it.cycle == record.cycle } == record &&
+            fresh.serial == target.serial && fresh.cycle == target.cycle &&
+            fresh.start == target.start && fresh.end == target.end &&
+            fresh.contract == target.contract && fresh.installation == target.installation &&
+            decision.allowed && decision.value == selected
+    }
+
     fun checkStatus(context: Context): AppData = SubmissionGate.lock.withLock {
         val store = SecureStore(context)
         val initial = store.read()
@@ -157,26 +179,31 @@ object SamchullyBridge {
         if (cancelled()) return@withLock store.update { latest -> BackgroundState.finish(latest, initial, record.copy(status = "rejected", detail = "제출 조건이 변경되어 전송하지 않았어요.")) }
         val credentials = initial.credentials ?: error("삼천리 로그인 정보를 다시 입력해 주세요.")
         val outcome = try {
-            SamchullyReadClient(Providers.get("samchully"), credentials).use { client ->
+            (SamchullyReadClient(Providers.get("samchully"), credentials).use { client ->
                 val login = client.login()
                 val contract = client.contracts(login, client.user(login)).singleOrNull { it.key == initial.profile.contract }
                     ?: error("저장한 삼천리 계약을 찾지 못했어요. 다시 연결해 주세요.")
-                client.validateAndSubmit(contract, target.serial, selected)
+                val freshTarget = selfReadTarget(contract, client.selfReadState(login, contract)) ?: throw SamchullyNoWriteException()
+                if (!canRegister(initial, store.read(), record, target, freshTarget, selected, automatic, cancelled = cancelled)) throw SamchullyNoWriteException()
+                client.validateAndSubmit(contract, freshTarget.serial, selected) {
+                    canRegister(initial, store.read(), record, target, freshTarget, selected, automatic, cancelled = cancelled)
+                }
                 val refreshed = selfReadTarget(contract, client.selfReadState(login, contract))
                 SubmissionOutcome(true, refreshed?.submitted == true && refreshed.submittedValue == selected &&
                     refreshed.cycle == target.cycle && refreshed.contract.bp == target.contract.bp &&
                     SkensClient.opaque("samchully:${refreshed.contract.bp}") == initial.profile.contract &&
                     refreshed.installation == initial.profile.meter, uncertain = false) to refreshed
-            }
-        } catch (_: Exception) { SubmissionOutcome(false, false, uncertain = true) to target }
-        val detail = when (outcome.first.status) {
+            }) to false
+        } catch (_: SamchullyNoWriteException) { (SubmissionOutcome(false, false) to target) to true
+        } catch (_: Exception) { (SubmissionOutcome(false, false, uncertain = true) to target) to false }
+        val detail = if (outcome.second) "제출 조건을 확인하지 못해 전송하지 않았어요. 다시 조회해 주세요." else when (outcome.first.first.status) {
             "confirmed" -> "공급사에서 제출 완료를 확인했어요."
             "uncertain" -> "전송 결과를 확인 중이에요. 공급사에서 제출 결과를 다시 확인해 주세요."
             else -> "공급사가 제출을 받지 않았어요. 공급사에서 확인해 주세요."
         }
         store.update { latest ->
-            val finished = BackgroundState.finish(latest, initial, record.copy(status = outcome.first.status, detail = detail))
-            if (finished === latest) latest else finished.copy(cachedSelfRead = outcome.second)
+            val finished = BackgroundState.finish(latest, initial, record.copy(status = outcome.first.first.status, detail = detail))
+            if (finished === latest) latest else finished.copy(cachedSelfRead = outcome.first.second)
         }
     }
 }
