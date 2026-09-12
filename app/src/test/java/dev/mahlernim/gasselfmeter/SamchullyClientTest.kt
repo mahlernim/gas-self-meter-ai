@@ -10,6 +10,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.IOException
 
 class SamchullyClientTest {
     private fun httpClient(code: Int, body: String) = okhttp3.OkHttpClient.Builder().addInterceptor { chain ->
@@ -129,20 +130,82 @@ class SamchullyClientTest {
         assertTrue(requests.all { it.url.toString().contains("scl/services/") })
     }
 
-    @Test fun submissionExpiryIsReportedAtSubmitStageWithoutRetry() {
+    @Test fun preflightAuthenticationFailureStopsBeforeRegistrationWithoutRetry() {
         var calls = 0
+        val requests = mutableListOf<okhttp3.Request>()
         val http = readOnlyHttpClient().newBuilder().addInterceptor { chain ->
             calls++
+            requests += chain.request()
             Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(401).message("synthetic")
                 .body("{}".toResponseBody("application/json".toMediaType())).build()
+        }.build()
+        SamchullyReadClient(Providers.get("samchully"), null, http).use { client ->
+            val failure = assertThrows(SamchullyNoWriteException::class.java) {
+                client.validateAndSubmit(SamchullyContract("0012345678", "합성", null, null, null, null), "target", 123.0)
+            }
+            val cause = failure.cause as ProviderFailure
+            assertEquals("submit", cause.stage)
+            assertEquals("authentication", cause.category)
+        }
+        assertEquals(1, calls)
+        assertFalse(requests.any { it.url.toString().contains("self-meter-img") })
+    }
+
+    @Test fun preflightsRequireExplicitSuccessBeforeRegistration() {
+        for (responses in listOf(
+            listOf("{}"),
+            listOf("{\"E_RETCD\":\"N\"}"),
+            listOf("{\"E_RETCD\":\"E\"}"),
+            listOf("{\"E_RETCD\":\"S\"}", "{}"),
+        )) {
+            val requests = mutableListOf<okhttp3.Request>()
+            val http = readOnlyHttpClient().newBuilder().addInterceptor { chain ->
+                requests += chain.request()
+                Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("synthetic")
+                    .body(responses[requests.lastIndex].toResponseBody("application/json".toMediaType())).build()
+            }.build()
+            SamchullyReadClient(Providers.get("samchully"), null, http).use { client ->
+                assertThrows(SamchullyNoWriteException::class.java) {
+                    client.validateAndSubmit(SamchullyContract("0012345678", "합성", null, null, null, null), "target", 123.0)
+                }
+            }
+            assertEquals(responses.size, requests.size)
+            assertFalse(requests.any { it.url.toString().contains("self-meter-img") })
+        }
+    }
+
+    @Test fun cancellationAfterPreflightsStopsBeforeRegistration() {
+        val requests = mutableListOf<okhttp3.Request>()
+        val http = readOnlyHttpClient().newBuilder().addInterceptor { chain ->
+            requests += chain.request()
+            Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("synthetic")
+                .body("{\"E_RETCD\":\"S\"}".toResponseBody("application/json".toMediaType())).build()
+        }.build()
+        SamchullyReadClient(Providers.get("samchully"), null, http).use { client ->
+            assertThrows(SamchullyNoWriteException::class.java) {
+                client.validateAndSubmit(SamchullyContract("0012345678", "합성", null, null, null, null), "target", 123.0) { false }
+            }
+        }
+        assertEquals(2, requests.size)
+        assertFalse(requests.any { it.url.toString().contains("self-meter-img") })
+    }
+
+    @Test fun responseLossAfterRegistrationNeverReplaysTheOneShotRequest() {
+        val requests = mutableListOf<okhttp3.Request>()
+        val http = readOnlyHttpClient().newBuilder().addInterceptor { chain ->
+            requests += chain.request()
+            if (requests.size == 3) throw IOException("synthetic response loss")
+            Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("synthetic")
+                .body("{\"E_RETCD\":\"S\"}".toResponseBody("application/json".toMediaType())).build()
         }.build()
         SamchullyReadClient(Providers.get("samchully"), null, http).use { client ->
             val failure = assertThrows(ProviderFailure::class.java) {
                 client.validateAndSubmit(SamchullyContract("0012345678", "합성", null, null, null, null), "target", 123.0)
             }
             assertEquals("submit", failure.stage)
-            assertEquals("authentication", failure.category)
+            assertEquals("network", failure.category)
         }
-        assertEquals(1, calls)
+        assertEquals(3, requests.size)
+        assertEquals(1, requests.count { it.url.toString().contains("self-meter-img") })
     }
 }

@@ -59,6 +59,15 @@ class GasappIntegrationTest {
         assertEquals(data.gasappBills, DataCodec.decode(portable).gasappBills)
     }
 
+    @Test fun restoredCustomerOnlyConnectionRemainsReadable() {
+        val encoded = org.json.JSONObject(DataCodec.encode(data(), true))
+        encoded.getJSONObject("gasappConnection").getJSONObject("account").put("contract", "")
+        val restored = DataCodec.decode(encoded.toString(), true)
+        assertEquals("", restored.gasappConnection!!.account.contract)
+        assertEquals("customer", restored.gasappConnection!!.account.customer)
+        assertFalse(GasappSubmissionPolicy.decide(restored, target.copy(account = restored.gasappConnection!!.account), automatic = false).allowed)
+    }
+
     @Test fun undatedBillsRemainMonthlyEvidenceAndNeverBecomeInventedPeriods() {
         val bill = GasappBill("2026-08", 12.0, 14000.0, null, null)
         val merged = GasappBridge.merge(data(), connection, GasappSnapshot(account, listOf(bill), emptyList(), target))

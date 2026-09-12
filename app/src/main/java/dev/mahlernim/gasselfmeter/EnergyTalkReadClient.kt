@@ -73,9 +73,14 @@ class EnergyTalkReadClient internal constructor(baseClient: OkHttpClient = OkHtt
     }
 
     /** Provider preflight only. A false answer is final for this attempt. */
-    suspend fun checkReading(token: String, expectedClientId: String, value: Double): EnergyTalkSubmissionCheck {
+    suspend fun checkReading(
+        token: String,
+        expectedClientId: String,
+        expectedAddress: String,
+        value: Double,
+    ): EnergyTalkSubmissionCheck {
         require(value.isFinite() && value in 0.0..99_999_999.0)
-        verifyTenant(token, expectedClientId)
+        verifyTenant(token, expectedClientId, expectedAddress)
         val body = JSONObject().put("guideline", java.math.BigDecimal.valueOf(value).stripTrailingZeros().toPlainString())
         val response = postProxy("/gas/api/self-meter/check", token, body)
         val allowed = response.optString("addableYn")
@@ -84,9 +89,16 @@ class EnergyTalkReadClient internal constructor(baseClient: OkHttpClient = OkHtt
     }
 
     /** Sends one form-data request only. The caller must reread status before reporting completion. */
-    suspend fun submitReading(token: String, expectedClientId: String, value: Double): JSONObject {
+    suspend fun submitReading(
+        token: String,
+        expectedClientId: String,
+        expectedAddress: String,
+        value: Double,
+        beforePost: () -> Boolean = { true },
+    ): JSONObject {
         require(value.isFinite() && value in 0.0..99_999_999.0)
-        verifyTenant(token, expectedClientId)
+        verifyTenant(token, expectedClientId, expectedAddress)
+        check(beforePost()) { "제출 조건이 변경됐어요. 다시 확인해 주세요." }
         val request = Request.Builder().url("https://energytalk.ai/api/formdata")
             .header("Authorization", "Bearer $token").header("Origin", "https://energytalk.ai")
             .header("Referer", "https://energytalk.ai/gas").header("Accept", "application/json")
@@ -97,10 +109,13 @@ class EnergyTalkReadClient internal constructor(baseClient: OkHttpClient = OkHtt
         return execute(request)
     }
 
-    private suspend fun verifyTenant(token: String, expectedClientId: String) {
+    private suspend fun verifyTenant(token: String, expectedClientId: String, expectedAddress: String) {
         require(expectedClientId in EnergyTalkBoundary.tenants)
         require(EnergyTalkBoundary.token("Bearer $token") == token)
-        check(get("/gas/api/user/info", token).optString("clientId") == expectedClientId) { "선택한 공급사와 로그인한 공급사가 달라요." }
+        require(expectedAddress.isNotBlank()) { "선택한 주소를 다시 확인해 주세요." }
+        val user = get("/gas/api/user/info", token)
+        check(user.optString("clientId") == expectedClientId) { "선택한 공급사와 로그인한 공급사가 달라요." }
+        check(text(user, "address", 500) == expectedAddress) { "선택한 주소가 변경됐어요. 다시 확인해 주세요." }
     }
 
     private suspend fun postProxy(path: String, token: String, body: JSONObject): JSONObject {

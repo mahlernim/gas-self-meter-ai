@@ -155,18 +155,21 @@ class GasappApi internal constructor(
 
     fun register(session: GasappSession, account: GasappAccount, consent: Boolean): GasappTarget {
         require(consent) { "자가검침 서비스 신청 내용을 확인해 주세요." }
+        requireContract(account)
         request("POST", "indications/register", session, account.company, body = JSONObject(account.params))
         return target(session, account)
     }
 
     fun changeChannel(session: GasappSession, account: GasappAccount, consent: Boolean): GasappTarget {
         require(consent) { "가스앱 검침으로 변경하는 데 동의해 주세요." }
+        requireContract(account)
         request("PUT", "indications/channel", session, account.company, body = JSONObject().put("useContractNum", account.contract))
         return target(session, account)
     }
 
     /** Caller must persist a pending record BEFORE this method and reconcile it instead of resending. */
     fun submit(session: GasappSession, expected: GasappTarget, value: Double, date: LocalDate = LocalDate.now(Korea)): GasappSubmitResult {
+        requireContract(expected.account)
         val fresh = target(session, expected.account)
         require(fresh.submissionIssue == null) { fresh.submissionIssue.orEmpty() }
         require(sameTarget(expected, fresh)) { "계약이나 계량기 정보가 변경됐어요. 다시 확인해 주세요." }
@@ -293,6 +296,10 @@ class GasappApi internal constructor(
             a.start != null && a.end != null && a.start == b.start && a.end == b.end && a.previous == b.previous &&
             a.meterChanged == b.meterChanged
 
+        internal fun requireContract(account: GasappAccount) {
+            checkAccount(account)
+            require(account.contract.isNotBlank()) { "사용계약번호를 다시 확인해 주세요." }
+        }
         private fun checkAccount(account: GasappAccount) {
             require(account.company in companyProviders) { "가스앱 회사 코드를 확인해 주세요." }
             require(account.customer.isNotBlank() || account.contract.isNotBlank()) { "연결된 계약을 찾지 못했어요." }

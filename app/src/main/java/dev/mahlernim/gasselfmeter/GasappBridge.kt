@@ -161,6 +161,7 @@ object GasappSubmissionPolicy {
         fun deny(reason: String) = SubmissionDecision(false, null, reason)
         val connection = data.gasappConnection ?: return deny("가스앱에 다시 연결해 주세요.")
         if (!Providers.get(data.profile.providerId).gasapp) return deny("가스앱 연결 정보를 확인해 주세요.")
+        if (connection.account.contract.isBlank()) return deny("사용계약번호를 다시 확인해 주세요.")
         if (automatic && !data.submissionSettings.automatic) return deny("자가검침 자동제출이 꺼져 있어요.")
         if (target == null) return deny("검침 기간을 먼저 확인해 주세요.")
         target.submissionIssue?.let { return deny(it) }

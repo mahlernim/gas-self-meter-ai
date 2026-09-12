@@ -64,6 +64,13 @@ class EnergyTalkTransportTest {
         try { client.verifyAndRead(token, "srb"); fail("Missing address accepted") } catch (_: IllegalStateException) { }
         assertEquals(listOf("/gas/api/user/info"), requests)
     }
+    @Test fun addressMismatchStopsPreflightBeforeCheck() = runBlocking {
+        val requests = CopyOnWriteArrayList<String>()
+        val client = transport(listOf(200 to user.replace("합성 주소", "다른 합성 주소")), requests)
+        try { client.checkReading(token, "srb", "합성 주소", 101.0); fail("Address mismatch accepted") }
+        catch (_: IllegalStateException) { }
+        assertEquals(listOf("/gas/api/user/info"), requests)
+    }
     @Test fun redirectIsRejectedWithoutFollowingOrReplaying() = runBlocking {
         val requests = CopyOnWriteArrayList<String>()
         val client = transport(listOf(302 to ""), requests)
@@ -131,9 +138,45 @@ class EnergyTalkTransportTest {
             response(request, responseBody)
         }.build()
         val client = EnergyTalkReadClient(base)
-        assertTrue(client.checkReading(token, "srb", 101.0).allowed)
-        client.submitReading(token, "srb", 101.0)
+        assertTrue(client.checkReading(token, "srb", "합성 주소", 101.0).allowed)
+        client.submitReading(token, "srb", "합성 주소", 101.0)
         assertEquals(listOf("GET:/gas/api/user/info", "POST:/gas/api/self-meter/check", "GET:/gas/api/user/info", "form"), requests)
+    }
+    @Test fun addressSwitchBetweenPreflightAndRegisterNeverPostsForm() = runBlocking {
+        val requests = CopyOnWriteArrayList<String>()
+        val base = OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            val body = Buffer().also { requireNotNull(request.body).writeTo(it) }.readUtf8()
+            val key = if (request.url.encodedPath == "/api/formdata") "form" else {
+                val envelope = JSONObject(body)
+                envelope.getString("method") + ":" + envelope.getString("url")
+            }
+            requests += key
+            val responseBody = when (requests.size) {
+                1 -> user
+                2 -> """{"responseCode":"ok","addableYn":"Y"}"""
+                3 -> user.replace("합성 주소", "바뀐 합성 주소")
+                else -> error("Unexpected request $key")
+            }
+            response(request, responseBody)
+        }.build()
+        val client = EnergyTalkReadClient(base)
+        assertTrue(client.checkReading(token, "srb", "합성 주소", 101.0).allowed)
+        try { client.submitReading(token, "srb", "합성 주소", 101.0); fail("Address switch accepted") }
+        catch (_: IllegalStateException) { }
+        assertEquals(listOf("GET:/gas/api/user/info", "POST:/gas/api/self-meter/check", "GET:/gas/api/user/info"), requests)
+        assertFalse(requests.contains("form"))
+    }
+    @Test fun callerVetoAfterIdentityVerificationNeverPostsForm() = runBlocking {
+        val requests = CopyOnWriteArrayList<String>()
+        val base = OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            requests += request.url.encodedPath
+            response(request, user)
+        }.build()
+        try { EnergyTalkReadClient(base).submitReading(token, "srb", "합성 주소", 101.0) { false }; fail("Caller veto accepted") }
+        catch (_: IllegalStateException) { }
+        assertEquals(listOf("/api/fetch"), requests)
     }
     @Test fun cancellationCancelsInFlightCallAndDoesNotStartAnotherRequest() = runBlocking {
         val started = CountDownLatch(1)

@@ -77,6 +77,34 @@ class GasappApiTest {
         assertEquals(1, server.requestCount)
     }
 
+    @Test fun contractOnlyAccountSendsItsContractForRelayInput() = withApi { server, api ->
+        val contractOnly = GasappAccount("1", "", "contract-only", "우리집", "N")
+        val state = """{"useContractNum":"contract-only","selfInputAvailable":"Y","periodStart":"2026-09-13","periodEnd":"2026-09-18","meterIdNum":"meter","lastMonthIndicatorQty":30,"mtrDigitCnt":5}"""
+        val expected = GasappApi.parseTarget(JSONObject(state), contractOnly)
+        server.enqueue(response(state))
+        server.enqueue(response("""{"inputYn":"Y"}"""))
+        server.enqueue(response(JSONObject(state).put("inputYn", "Y").put("thisMonthIndicatorCustomer", 36).toString()))
+        assertEquals(GasappSubmitStatus.CONFIRMED, api.submit(session, expected, 36.0, LocalDate.of(2026, 9, 18)).status)
+        assertEquals("GET", server.takeRequest().method)
+        val post = server.takeRequest()
+        assertEquals("POST", post.method)
+        val payload = JSONObject(post.body.readUtf8())
+        assertEquals("contract-only", payload.getString("useContractNum"))
+        assertEquals("", payload.getString("customerNum"))
+        assertEquals("GET", server.takeRequest().method)
+    }
+
+    @Test fun blankContractNeverStartsGasappMutation() = withApi { server, api ->
+        val customerOnly = GasappAccount("1", "customer-only", "", "우리집", "N")
+        val restored = DataCodec.decode(DataCodec.encode(AppData(gasappConnection = GasappConnection(session, customerOnly)), true), true)
+        val restoredAccount = restored.gasappConnection!!.account
+        assertThrows(IllegalArgumentException::class.java) { api.register(session, restoredAccount, consent = true) }
+        assertThrows(IllegalArgumentException::class.java) { api.changeChannel(session, restoredAccount, consent = true) }
+        val target = GasappTarget(restoredAccount, true, true, "2026-09-13", "2026-09-18", "meter", 30.0, 5, false, false, false, null)
+        assertThrows(IllegalArgumentException::class.java) { api.submit(session, target, 36.0, LocalDate.of(2026, 9, 18)) }
+        assertEquals(0, server.requestCount)
+    }
+
     @Test fun submitConfirmsOnlySameMeterPeriodAndValue() = withApi { server, api ->
         val expected = GasappApi.parseTarget(JSONObject(targetJson), account)
         server.enqueue(response(targetJson))

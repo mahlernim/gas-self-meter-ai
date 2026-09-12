@@ -13,6 +13,14 @@ The Alpha track ships reasonable implementations, collects tester feedback and c
 | EnergyTalk | Official session and selected service/address drive billing and direct submission across configured tenants. | Shared frontend observations and synthetic tests. Real response variations are tracked separately. |
 | Haeyang | Mobile WEB LOGIN bootstrap and legacy JSON envelopes support account discovery, bills and SELF100/SELF101 status/submission. | The public getDecAES WEB branch serializes object values without native decryption. Encrypted or unknown structures are rejected. Amount scaling and billing fields follow public frontend semantics and synthetic tests. |
 
+## 0.6.1 submission checks
+
+Samchully rechecks the selected contract, meter, target and period after login, then checks the current local reading and cancellation state before registration. Both `validation-tidnr` responses must carry `E_RETCD=S`. This is the adapter's affirmative-success contract, covered by synthetic responses, rather than a claim of new account validation. Other responses stop before registration. A lost registration response still requires receipt reconciliation instead of retransmission.
+
+EnergyTalk rechecks both tenant and selected address before preflight and registration. Its display month and address-derived meter key remain assumptions, so this patch does not enable automatic submission for this adapter.
+
+Gasapp registration, channel changes and reading submission require a nonblank `useContractNum`. A contract-only account remains supported. Existing customer-only connections remain readable after upgrade, but submission asks the user to check the contract before a pending attempt is recorded. Read-request parameter shapes are unchanged.
+
 ## September 6, 2026 direct-provider implementation
 
 Haeyang public `common/js/hyBizMOB.js` has SHA-256 `b845f7339b788d6cc124a433befbd065df67f3a394b010e0a1e0e0b9833c6bfd`. Its WEB branch supplies a usable transport without a guessed native AES key. Requests remain supplier-bound. SELF101 is the reading write, while service enrollment and cancellation are excluded.
