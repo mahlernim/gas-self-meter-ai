@@ -9,7 +9,7 @@ class SubmissionPolicyTest {
         val initial = data().copy(periods = emptyList(), observations = listOf(Observation(time - 1000, 107.2, data().profile.meter)))
         val decision = SubmissionPolicy.decide(initial, target, time, automatic = false)
         assertTrue(decision.allowed)
-        assertEquals(107.2, decision.value!!, .001)
+        assertEquals(107.0, decision.value!!, .001)
         assertFalse(SubmissionPolicy.decide(initial, target, time, automatic = true).allowed)
         assertFalse(SubmissionPolicy.decide(initial, target.copy(end = date.plusDays(1).toString()), time + 86_400_000, automatic = false).allowed)
     }
@@ -63,6 +63,17 @@ class SubmissionPolicyTest {
     @Test fun manualSubmissionDoesNotRequireRemovedFeatureToggle() {
         val original = data()
         assertTrue(SubmissionPolicy.decide(original.copy(submissionSettings = original.submissionSettings.copy(enabled = false)), target, time, automatic = false).allowed)
+    }
+
+    @Test fun skensPolicyFloorsFractionalReadingInsteadOfRoundingIt() {
+        val meter = data().profile.meter
+        val fractional = data().copy(observations = listOf(
+            Observation(time - 8 * 86_400_000L, 100.0, meter),
+            Observation(time - 1_000L, 107.999, meter),
+        ))
+        val decision = SubmissionPolicy.decide(fractional, target, time, automatic = false)
+        assertTrue(decision.allowed)
+        assertEquals(107.0, decision.value!!, 0.0)
     }
     @Test fun newReminderPreferencesRoundTripAndLegacyDefaultsMigrate() {
         val original = data().copy(profile = data().profile.copy(reminderRepeatCount = 6, customerNumber = "123"),

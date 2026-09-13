@@ -169,6 +169,7 @@ class GasappApi internal constructor(
 
     /** Caller must persist a pending record BEFORE this method and reconcile it instead of resending. */
     fun submit(session: GasappSession, expected: GasappTarget, value: Double, date: LocalDate = LocalDate.now(Korea)): GasappSubmitResult {
+        val reading = SubmissionReading.wire(value)
         requireContract(expected.account)
         val fresh = target(session, expected.account)
         require(fresh.submissionIssue == null) { fresh.submissionIssue.orEmpty() }
@@ -176,11 +177,11 @@ class GasappApi internal constructor(
         require(fresh.registered && fresh.eligible && !fresh.needsChannelChange && !fresh.submitted) { "현재 제출 가능한 상태가 아니에요." }
         require(fresh.start != null && fresh.end != null && date >= LocalDate.parse(fresh.start) && date <= LocalDate.parse(fresh.end)) { "자가검침 입력 기간이 아니에요." }
         require(fresh.meter != null && fresh.previous != null) { "계량기와 이전 지침을 확인해 주세요." }
-        require(value.isFinite() && value >= fresh.previous && value <= 99_999_999 && value == kotlin.math.floor(value)) { "가스앱에는 계량기의 정수 지침을 입력해 주세요." }
+        require(value >= fresh.previous) { "가스앱에는 계량기의 정수 지침을 입력해 주세요." }
         require(fresh.digits == null || BigDecimal.valueOf(value).toBigInteger().toString().length <= fresh.digits) { "계량기 자릿수를 확인해 주세요." }
         val response = try {
             obj(request("POST", "relay/indications/input", session, fresh.account.company, body = JSONObject(fresh.account.params)
-                .put("thisMonthIndicatorCustomer", BigDecimal.valueOf(value).toBigIntegerExact().toString())))
+                .put("thisMonthIndicatorCustomer", reading)))
         } catch (_: Exception) { return reconcile(session, fresh, value) }
         if (string(response, "inputYn") == "N") return GasappSubmitResult(GasappSubmitStatus.REJECTED, null)
         return reconcile(session, fresh, value)

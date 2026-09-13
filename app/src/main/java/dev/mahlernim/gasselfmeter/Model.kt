@@ -13,6 +13,16 @@ fun dateOf(time: Long): LocalDate = Instant.ofEpochMilli(time).atZone(Korea).toL
 fun number(value: String): Double = value.trim().replace(",", "").toDoubleOrNull()
     ?.takeIf { it.isFinite() && it >= 0 && it <= 99_999_999 } ?: error("0 이상 99,999,999 이하의 숫자를 입력해 주세요.")
 
+/** Keeps local estimates precise while making every provider submission an integer meter reading. */
+object SubmissionReading {
+    fun floor(value: Double): Double = kotlin.math.floor(value)
+
+    fun wire(value: Double, maximum: Double = 99_999_999.0): String {
+        require(value.isFinite() && value in 0.0..maximum && value == floor(value)) { "제출할 검침값을 확인해 주세요." }
+        return value.toLong().toString()
+    }
+}
+
 data class UsagePeriod(
     val start: String, val end: String, val usage: Double,
     val meter: String = "manual", val previous: Double? = null, val current: Double? = null,
@@ -122,7 +132,8 @@ object SubmissionPolicy {
         }
         val estimated = (if (!automatic && dateOf(latest.time) == date) latest.reading else Estimator.estimate(data, time).reading)
             ?: return SubmissionDecision(false, null, "제출할 현재 누적 지침을 계산할 수 없어요.")
-        val value = kotlin.math.round(estimated * 10.0) / 10.0
+        val value = SubmissionReading.floor(estimated)
+        if (!value.isFinite()) return SubmissionDecision(false, null, "제출할 현재 누적 지침을 계산할 수 없어요.")
         if (value < target.previousValue) return SubmissionDecision(false, value, "계산한 값이 공급사의 이전 검침값보다 작아 입력하지 않아요.")
         val reason = if (automatic) "오늘은 검침 기간 마지막 날이며, 마지막 실측 확인이 ${age}일 전이에요." else "검침 기간과 기존 입력 여부를 확인했어요."
         return SubmissionDecision(true, value, reason)

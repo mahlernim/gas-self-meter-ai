@@ -176,12 +176,13 @@ class GasappApiTest {
         assertEquals(4, server.requestCount)
     }
 
-    @Test fun decimalsAndOutOfWindowNeverSubmit() = withApi { server, api ->
-        repeat(2) { server.enqueue(response(targetJson)) }
+    @Test fun decimalsNeverReachGasappAndOutOfWindowStopsBeforeMutation() = withApi { server, api ->
         val expected = GasappApi.parseTarget(JSONObject(targetJson), account)
         assertThrows(IllegalArgumentException::class.java) { api.submit(session, expected, 36.7, LocalDate.of(2026, 9, 18)) }
+        assertEquals(0, server.requestCount)
+        server.enqueue(response(targetJson))
         assertThrows(IllegalArgumentException::class.java) { api.submit(session, expected, 36.0, LocalDate.of(2026, 9, 19)) }
-        repeat(2) { assertEquals("GET", server.takeRequest().method) }
+        assertEquals("GET", server.takeRequest().method)
     }
 
     @Test fun historyUsesInclusiveSixthRowCursorWithoutLosingIt() = withApi { server, api ->

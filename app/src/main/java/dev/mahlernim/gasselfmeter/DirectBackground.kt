@@ -29,7 +29,7 @@ internal object DirectBackground {
                 data = DirectProviderBridge.submit(context, automatic = true, cancelled = { worker.isStopped })
                 val record = data.submissions.lastOrNull { it.cycle == target.cycle }
                 text = when (record?.status) {
-                    "confirmed" -> "검침값 ${record.value} m³ 자동 제출을 완료했어요."
+                    "confirmed" -> "검침값 ${SubmissionReading.wire(record.value)} m³ 자동 제출을 완료했어요."
                     "pending", "uncertain" -> ReminderPolicy.UNCERTAIN
                     else -> ReminderPolicy.submissionText(data, data.cachedSelfRead, System.currentTimeMillis(), failed = true)
                 }

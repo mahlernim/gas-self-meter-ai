@@ -39,8 +39,23 @@ class ProviderExpansionFlowTest {
             compose.onNodeWithText("제출", useUnmergedTree = true).performClick()
             compose.onNodeWithText("자가검침 제출").assertIsDisplayed()
             compose.onNodeWithText("입력 예정 111 m³").performScrollTo().assertIsDisplayed()
-            compose.onNodeWithText("111 m³ 직접 제출").performScrollTo().assertIsEnabled()
+            compose.onNodeWithText("소수점 아래 숫자는 제외하고 정수 지침을 제출해요.").performScrollTo().assertIsDisplayed()
             compose.onNodeWithText("이 공급사는 직접 제출만 지원해요.").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithText("111 m³ 직접 제출").performScrollTo().assertIsEnabled().performClick()
+            compose.onNodeWithText("검침값을 공급사에 입력할까요?").assertIsDisplayed()
+            compose.onNodeWithText("삼천리에 111 m³를 입력합니다.", substring = true).assertIsDisplayed()
+        }
+    }
+
+    @Test fun legacyFractionalSubmittedValueRemainsFractionalOnSubmissionPage() {
+        val data = samchullyData()
+        SecureStore(context).write(data.copy(cachedSelfRead = requireNotNull(data.cachedSelfRead).copy(
+            submitted = true, submittedValue = 101.8)))
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            compose.awaitStorage(scenario)
+            compose.onNodeWithText("제출", useUnmergedTree = true).performClick()
+            compose.onNodeWithText("입력 완료 · 101.8 m³").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithText("입력 완료 · 102 m³").assertDoesNotExist()
         }
     }
 

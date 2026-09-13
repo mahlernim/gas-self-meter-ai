@@ -3,7 +3,6 @@ package dev.mahlernim.gasselfmeter
 import android.content.Context
 import java.time.LocalDate
 import kotlin.concurrent.withLock
-import kotlin.math.floor
 
 /** Provider reads and writes remain separate. Every write is preceded by a persisted pending record. */
 object GasappBridge {
@@ -186,8 +185,8 @@ object GasappSubmissionPolicy {
         val directObservation = data.observations.lastOrNull { it.meter == data.profile.meter && it.time <= time }
             ?.takeIf { !automatic && dateOf(it.time) == dateOf(time) }
         val value = when {
-            directObservation != null -> floor(directObservation.reading)
-            estimate != null -> floor(estimate)
+            directObservation != null -> SubmissionReading.floor(directObservation.reading)
+            estimate != null -> SubmissionReading.floor(estimate)
             else -> return deny("오늘 확인한 계량기 숫자 또는 사용량 추정이 필요해요.")
         }
         if (target.previous == null || !value.isFinite() || value < target.previous || value > 99_999_999) return deny("이전 지침과 제출값을 확인해 주세요.")

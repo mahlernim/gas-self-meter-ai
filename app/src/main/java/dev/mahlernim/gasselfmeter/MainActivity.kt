@@ -62,12 +62,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
+import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 import java.util.Locale
-import kotlin.math.roundToInt
 
 private val Teal = Color(0xFF006C67)
 private val DeepTeal = Color(0xFF053F49)
@@ -77,6 +77,9 @@ private val Ink = Color(0xFF192F32)
 private val Muted = Color(0xFF526968)
 private val Pale = Color(0xFFE4F0EB)
 fun decimalText(value: Double?, digits: Int = 1): String = value?.let { String.format(Locale.KOREA, "%,.${digits}f", it) } ?: "아직 몰라요"
+
+private fun submittedReadingText(value: Double): String =
+    if (value.isFinite()) BigDecimal.valueOf(value).stripTrailingZeros().toPlainString() else decimalText(value)
 
 object AppLinks {
     const val PLAY_STORE = "market://details?id=dev.mahlernim.gasselfmeter"
@@ -285,12 +288,13 @@ private sealed interface Confirmation {
     } }
     submitValue?.let { value ->
         val provider = Providers.get(data.profile.providerId)
-        val valueText = decimalText(value, if (provider.gasapp || provider.samchully || provider.direct || data.energyTalkConnection != null) 0 else 1)
+        val submittedValue = SubmissionReading.floor(value)
+        val valueText = decimalText(submittedValue, 0)
         AlertDialog(onDismissRequest = { submitValue = null }, title = { Text("검침값을 공급사에 입력할까요?") },
             text = { Text("${provider.name}에 $valueText m³를 입력합니다." +
-                (if (provider.gasapp || provider.samchully || provider.direct || data.energyTalkConnection != null) "\n\n소수점 아래를 제외한 정수 지침을 제출해요." else "") +
+                "\n\n소수점 아래 숫자는 제외하고 정수 지침을 제출해요." +
                 "\n\n전송 직전에 기간과 기존 제출 여부를 다시 확인하며, 결과가 불확실하면 자동으로 다시 보내지 않습니다.") },
-            confirmButton = { TextButton(onClick = { vm.submitReading(value); submitValue = null }) { Text("$valueText m³ 입력") } },
+            confirmButton = { TextButton(onClick = { vm.submitReading(submittedValue); submitValue = null }) { Text("$valueText m³ 입력") } },
             dismissButton = { TextButton(onClick = { submitValue = null }) { Text("취소") } })
     }
     if (addHistory) HistoryDialog(vm.busy, close = { addHistory = false }) { start, end, value, result ->
@@ -617,7 +621,6 @@ private sealed interface Confirmation {
 @Composable private fun SubmissionPage(data: AppData, target: SelfReadTarget?, now: Long, estimate: Estimate, busy: Boolean,
     refresh: () -> Unit, submit: (Double) -> Unit,
     changeSettings: (SubmissionSettings) -> Unit) {
-    val submissionDigits = if (data.gasappConnection != null || data.energyTalkConnection != null || data.profile.providerId == "samchully" || Providers.get(data.profile.providerId).direct) 0 else 1
     val settings = data.submissionSettings
     val provider = Providers.get(data.profile.providerId)
     val demo = data.profile.meter == "demo"
@@ -650,7 +653,7 @@ private sealed interface Confirmation {
     val submitted = if (useGasapp) gasappTarget?.submitted == true else target?.submitted == true
     val submittedValue = if (useGasapp) gasappTarget?.submittedValue else target?.submittedValue
     val demoDate = dateOf(now)
-    val demoValue = if (demo) estimate.reading?.let { kotlin.math.round(it * 10.0) / 10.0 } else null
+    val demoValue = if (demo) estimate.reading?.let(SubmissionReading::floor) else null
     Page {
         Title("자가검침 제출", "기간과 숫자를 확인해 직접 제출하거나, 조건을 정해 마지막 날 자동으로 제출해요.")
         if (demo) Badge("예시 데이터 · 실제로 제출되지 않아요")
@@ -659,23 +662,28 @@ private sealed interface Confirmation {
             if (demo) {
                 val month = YearMonth.from(demoDate)
                 Text("${month.atDay(20)} ~ ${month.atDay(25)}", color = Muted, style = MaterialTheme.typography.bodySmall)
-                Text(demoValue?.let { "입력 예정 ${decimalText(it, submissionDigits)} m³" } ?: "입력할 숫자를 계산하는 중", fontSize = 28.sp, fontWeight = FontWeight.Bold)
+                Text(demoValue?.let { "입력 예정 ${decimalText(it, 0)} m³" } ?: "입력할 숫자를 계산하는 중", fontSize = 28.sp, fontWeight = FontWeight.Bold)
                 Text("최근 실측 7일 전 · 기존 제출 없음", color = Muted, style = MaterialTheme.typography.bodySmall)
-                ActionButton(demoValue?.let { "${decimalText(it, submissionDigits)} m³ 직접 제출" } ?: "직접 제출", Icons.Outlined.CloudUpload, false) {}
+                Text("소수점 아래 숫자는 제외하고 정수 지침을 제출해요.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                ActionButton(demoValue?.let { "${decimalText(it, 0)} m³ 직접 제출" } ?: "직접 제출", Icons.Outlined.CloudUpload, false) {}
             } else if (!hasTarget) {
                 Text("공급사에서 검침 기간을 확인해 주세요.", color = Muted)
             } else {
                 if (periodStart != null && periodEnd != null) Text("$periodStart ~ $periodEnd", color = Muted, style = MaterialTheme.typography.bodySmall)
                 when {
-                    submitted -> Text(submittedValue?.let { "입력 완료 · ${decimalText(it, submissionDigits)} m³" } ?: "입력 완료", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Teal)
-                    decision.value != null -> Text("입력 예정 ${decimalText(decision.value, submissionDigits)} m³", fontSize = 28.sp, fontWeight = FontWeight.Bold)
+                    submitted -> Text(submittedValue?.let { "입력 완료 · ${submittedReadingText(it)} m³" } ?: "입력 완료", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Teal)
+                    decision.value != null -> Text("입력 예정 ${decimalText(SubmissionReading.floor(decision.value), 0)} m³", fontSize = 28.sp, fontWeight = FontWeight.Bold)
                     else -> Text("아직 입력할 수 없어요", fontSize = 23.sp, fontWeight = FontWeight.Bold)
                 }
             }
             if (!demo) {
                 Text(decision.reason, color = Muted, style = MaterialTheme.typography.bodySmall)
                 ActionButton("검침 기간과 제출 상태 새로 확인", Icons.Outlined.Refresh, !busy, refresh)
-                if (decision.allowed && decision.value != null) ActionButton("${decimalText(decision.value, submissionDigits)} m³ 직접 제출", Icons.Outlined.CloudUpload, !busy) { submit(decision.value) }
+                if (decision.allowed && decision.value != null) {
+                    Text("소수점 아래 숫자는 제외하고 정수 지침을 제출해요.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                    val value = SubmissionReading.floor(decision.value)
+                    ActionButton("${decimalText(value, 0)} m³ 직접 제출", Icons.Outlined.CloudUpload, !busy) { submit(value) }
+                }
             }
         }
         SettingsSection("자가검침 자동제출") {
@@ -708,7 +716,7 @@ private sealed interface Confirmation {
         data.submissions.sortedByDescending { it.attemptedAt }.take(5).forEach { record ->
             SurfaceCard {
                 Text("${record.periodStart} ~ ${record.periodEnd}", color = Muted, style = MaterialTheme.typography.labelMedium)
-                Text("${decimalText(record.value)} m³", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                Text("${submittedReadingText(record.value)} m³", fontSize = 22.sp, fontWeight = FontWeight.Bold)
                 Text(record.detail, color = if (record.status == "confirmed") Teal else Muted, style = MaterialTheme.typography.bodySmall)
             }
         }

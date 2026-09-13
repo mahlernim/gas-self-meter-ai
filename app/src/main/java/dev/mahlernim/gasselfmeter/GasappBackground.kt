@@ -39,7 +39,7 @@ internal object GasappBackground {
                 data = GasappBridge.submit(context, automatic = true, cancelled = { worker.isStopped })
                 val result = data.submissions.lastOrNull { it.cycle == target.cycle }
                 text = when (result?.status) {
-                    "confirmed" -> "검침값 ${result.value} m³ 자동 제출을 완료했어요."
+                    "confirmed" -> "검침값 ${SubmissionReading.wire(result.value)} m³ 자동 제출을 완료했어요."
                     "uncertain", "pending" -> ReminderPolicy.UNCERTAIN
                     else -> reminderText(data, data.cachedGasappTarget, System.currentTimeMillis(), failed = true)
                 }

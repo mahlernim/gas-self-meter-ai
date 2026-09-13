@@ -14,7 +14,6 @@ import java.net.URLEncoder
 import java.time.LocalDate
 import java.util.concurrent.TimeUnit
 import kotlin.math.abs
-import kotlin.math.floor
 
 /** Runtime labelled-form adapter. Each Daesung company retains its own origin and meter path. */
 class DaesungProviderClient internal constructor(
@@ -72,14 +71,14 @@ class DaesungProviderClient internal constructor(
     }
 
     override fun submit(contract: DirectContract, target: SelfReadTarget, value: Double) = stage("submit") {
-        require(value.isFinite() && value in 0.0..99_999.0 && value == floor(value)) { "제출할 검침값을 확인해 주세요." }
+        val reading = SubmissionReading.wire(value, 99_999.0)
         val fresh = read(contract).target ?: fail("submit", "validation")
         require(sameTarget(target, fresh) && fresh.eligible && !fresh.submitted && fresh.previousValue != null && value >= fresh.previousValue) {
             "검침 대상과 값을 다시 확인해 주세요."
         }
         require(today() in LocalDate.parse(fresh.start)..LocalDate.parse(fresh.end)) { "현재는 검침값 입력 기간이 아니에요." }
         val form = forms[fresh.cycle] ?: fail("submit", "validation")
-        val body = FormBody.Builder().apply { form.fields.forEach { (k, v) -> add(k, v) }; add(form.reading, value.toLong().toString()) }.build()
+        val body = FormBody.Builder().apply { form.fields.forEach { (k, v) -> add(k, v) }; add(form.reading, reading) }.build()
         val reply = request(Request.Builder().url(url(form.action)).header("Origin", baseUrl.toString().trimEnd('/'))
             .header("Referer", url(config(providerId).meterPath).toString()).post(body.oneShot()).build(), "submit")
         if (reply.code in redirects || reply.body.contains("로그인", true)) fail("submit", "uncertain")

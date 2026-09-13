@@ -1,7 +1,6 @@
 package dev.mahlernim.gasselfmeter
 
 import java.time.LocalDate
-import kotlin.math.floor
 
 /** Same one-shot policy for manual checks and explicitly enabled last-day background submissions. */
 object DirectSubmissionPolicy {
@@ -37,7 +36,7 @@ object DirectSubmissionPolicy {
         val age = (time - observed.time) / 86_400_000L
         if (automatic && settings.requireRecentCheck && age > settings.recentDays)
             return deny("마지막 실측 확인이 ${age}일 전이에요. ${settings.recentDays}일 이내에 다시 확인해 주세요.")
-        val reading = floor((if (!automatic && dateOf(observed.time) == date) observed.reading else Estimator.estimate(data, time).reading)
+        val reading = SubmissionReading.floor((if (!automatic && dateOf(observed.time) == date) observed.reading else Estimator.estimate(data, time).reading)
             ?: return deny("제출할 지침을 계산할 수 없어요."))
         if (!reading.isFinite() || reading !in 0.0..maximumReading || reading < target.previousValue)
             return deny("이전 지침과 제출값을 확인해 주세요.")

@@ -137,7 +137,7 @@ class SubmissionWorker(context: Context, params: WorkerParameters) : Worker(cont
                         val outcome = client.submitReading(current, decision.value)
                         val status = outcome.status
                         text = when (status) {
-                            "confirmed" -> "검침값 ${decision.value} m³ 자동 제출을 완료했어요."
+                            "confirmed" -> "검침값 ${SubmissionReading.wire(decision.value)} m³ 자동 제출을 완료했어요."
                             "rejected" -> ReminderPolicy.DEADLINE
                             else -> ReminderPolicy.UNCERTAIN
                         }
