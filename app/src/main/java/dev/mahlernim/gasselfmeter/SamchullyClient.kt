@@ -138,8 +138,7 @@ class SamchullyReadClient internal constructor(
     ) = atStage("submit") {
         requireCustomerNo(contract.customerNo)
         require(targetId.length in 1..100 && targetId.none(Char::isISOControl)) { "삼천리 검침 대상 정보를 확인해 주세요." }
-        require(value.isFinite() && value in 0.0..99_999_999.0) { "제출할 검침값을 확인해 주세요." }
-        val reading = value.toString()
+        val reading = SubmissionReading.wire(value)
         val base = JSONObject().apply {
             put("I_VKONT", contract.customerNo)
             put("I_TIDNR", targetId)

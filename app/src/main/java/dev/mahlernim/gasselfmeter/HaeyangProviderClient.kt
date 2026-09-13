@@ -95,15 +95,16 @@ class HaeyangProviderClient internal constructor(
     }
 
     override fun submit(contract: DirectContract, target: SelfReadTarget, value: Double) = at("submit") {
+        val reading = SubmissionReading.wire(value)
         account(contract)
         val fresh = target(contract) ?: fail("submit", "validation")
         val installation = DirectIdentity.meter("haeyang", contract.id, contract.meterId)
         check(target.contract.bp == contract.id && target.contract.ca == "haeyang" && target.installation == installation)
         check(fresh.cycle == target.cycle && fresh.previousValue == target.previousValue && fresh.serial == target.serial)
         check(fresh.eligible && !fresh.submitted && now() in LocalDate.parse(fresh.start)..LocalDate.parse(fresh.end))
-        check(value.isFinite() && value == kotlin.math.floor(value) && value in (fresh.previousValue ?: Double.POSITIVE_INFINITY)..99_999_999.0)
+        check(value in (fresh.previousValue ?: Double.POSITIVE_INFINITY)..99_999_999.0)
         val order = fresh.serial.substringAfterLast(':').takeIf { it.isNotBlank() } ?: fail("submit", "parse")
-        request("SELF101", JSONObject().apply { put("CURR_INDCT", value.toLong().toString()); put("MTORDERNO", order); put("IFFLAG", "W") }, "submit", oneShot = true)
+        request("SELF101", JSONObject().apply { put("CURR_INDCT", reading); put("MTORDERNO", order); put("IFFLAG", "W") }, "submit", oneShot = true)
         val confirmed = target(contract) ?: fail("submit", "parse")
         check(confirmed.cycle == fresh.cycle && confirmed.submitted && confirmed.submittedValue == value) { "해양에너지 제출 결과를 다시 확인해 주세요." }
     }

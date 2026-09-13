@@ -71,6 +71,14 @@ class EnergyTalkTransportTest {
         catch (_: IllegalStateException) { }
         assertEquals(listOf("/gas/api/user/info"), requests)
     }
+    @Test fun fractionalDirectSubmissionStopsBeforeIdentityRequest() = runBlocking {
+        val requests = CopyOnWriteArrayList<String>()
+        val client = transport(emptyList(), requests)
+        assertThrows(IllegalArgumentException::class.java) {
+            runBlocking { client.submitReading(token, "srb", "합성 주소", 101.001) }
+        }
+        assertTrue(requests.isEmpty())
+    }
     @Test fun redirectIsRejectedWithoutFollowingOrReplaying() = runBlocking {
         val requests = CopyOnWriteArrayList<String>()
         val client = transport(listOf(302 to ""), requests)

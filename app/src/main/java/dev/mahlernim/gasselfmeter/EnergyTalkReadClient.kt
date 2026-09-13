@@ -79,9 +79,9 @@ class EnergyTalkReadClient internal constructor(baseClient: OkHttpClient = OkHtt
         expectedAddress: String,
         value: Double,
     ): EnergyTalkSubmissionCheck {
-        require(value.isFinite() && value in 0.0..99_999_999.0)
+        val reading = SubmissionReading.wire(value)
         verifyTenant(token, expectedClientId, expectedAddress)
-        val body = JSONObject().put("guideline", java.math.BigDecimal.valueOf(value).stripTrailingZeros().toPlainString())
+        val body = JSONObject().put("guideline", reading)
         val response = postProxy("/gas/api/self-meter/check", token, body)
         val allowed = response.optString("addableYn")
         require(allowed == "Y" || allowed == "N") { "검침값 입력 가능 상태를 확인하지 못했어요." }
@@ -96,7 +96,7 @@ class EnergyTalkReadClient internal constructor(baseClient: OkHttpClient = OkHtt
         value: Double,
         beforePost: () -> Boolean = { true },
     ): JSONObject {
-        require(value.isFinite() && value in 0.0..99_999_999.0)
+        val reading = SubmissionReading.wire(value)
         verifyTenant(token, expectedClientId, expectedAddress)
         check(beforePost()) { "제출 조건이 변경됐어요. 다시 확인해 주세요." }
         val request = Request.Builder().url("https://energytalk.ai/api/formdata")
@@ -104,7 +104,7 @@ class EnergyTalkReadClient internal constructor(baseClient: OkHttpClient = OkHtt
             .header("Referer", "https://energytalk.ai/gas").header("Accept", "application/json")
             .post(MultipartBody.Builder().setType(MultipartBody.FORM)
                 .addFormDataPart("method", "POST").addFormDataPart("url", "/gas/api/self-meter")
-                .addFormDataPart("guideline", java.math.BigDecimal.valueOf(value).stripTrailingZeros().toPlainString()).build().oneShot())
+                .addFormDataPart("guideline", reading).build().oneShot())
             .build()
         return execute(request)
     }

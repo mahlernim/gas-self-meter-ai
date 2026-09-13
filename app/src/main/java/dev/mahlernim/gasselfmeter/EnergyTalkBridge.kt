@@ -165,7 +165,7 @@ object EnergyTalkSubmissionPolicy {
         if (prior?.status in setOf("pending", "uncertain", "confirmed")) return deny("이전 전송 결과를 공급사에서 확인해 주세요.")
         val observed = data.observations.lastOrNull { it.meter == data.profile.meter && it.time <= time }
             ?: return deny("실제 계량기 숫자를 먼저 확인해 주세요.")
-        val value = kotlin.math.floor((if (dateOf(observed.time) == date) observed.reading else Estimator.estimate(data, time).reading)
+        val value = SubmissionReading.floor((if (dateOf(observed.time) == date) observed.reading else Estimator.estimate(data, time).reading)
             ?: return deny("오늘 확인한 계량기 숫자 또는 사용량 추정이 필요해요."))
         if (target.previousValue == null || !value.isFinite() || value !in 0.0..99_999_999.0 || value < target.previousValue) return deny("이전 지침과 제출값을 확인해 주세요.")
         return SubmissionDecision(true, value, "검침 기간과 기존 제출 여부를 확인했어요.")

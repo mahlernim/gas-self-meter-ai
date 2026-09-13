@@ -150,7 +150,7 @@ class SkensClient(private val provider: Provider, private val credentials: Crede
             if (failed > 0) "$failed 개월은 읽지 못했어요. 기존 이력은 유지했고, 다시 새로고침할 수 있어요." else null, target)
     }
     fun submitReading(target: SelfReadTarget, value: Double): SubmissionOutcome {
-        require(value.isFinite() && value in 0.0..99_999_999.0) { "제출할 검침값을 확인해 주세요." }
+        val reading = SubmissionReading.wire(value)
         require(target.eligible) { "자가검침 대상 계약이 아니에요." }
         require(!target.submitted) { "이번 검침값은 이미 제출되어 있어요." }
         require(today() in LocalDate.parse(target.start)..LocalDate.parse(target.end)) { "현재는 검침값 입력 기간이 아니에요." }
@@ -158,7 +158,7 @@ class SkensClient(private val provider: Provider, private val credentials: Crede
         val response = runCatching { JSONObject(request("read/insertSelfRead.do", mapOf(
             "bpno" to target.contract.bp, "name" to target.contract.name, "cano" to target.contract.ca,
             "sernr" to target.serial, "addr" to target.address,
-            "cust_readingresult" to value.toString(), "adatsoll1" to target.planned,
+            "cust_readingresult" to reading, "adatsoll1" to target.planned,
             "v_ldo" to target.vLdo, "anlage" to target.installation
         ))) }.getOrNull()
         val result = response?.optString("result")?.trim()

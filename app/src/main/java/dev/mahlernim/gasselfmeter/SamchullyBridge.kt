@@ -4,7 +4,6 @@ import android.content.Context
 import java.time.LocalDate
 import java.time.YearMonth
 import kotlin.concurrent.withLock
-import kotlin.math.floor
 
 data class SamchullyLogin(val session: SamchullySession, val contracts: List<SamchullyContract>)
 data class SamchullySnapshot(
@@ -225,7 +224,7 @@ object SamchullySubmissionPolicy {
             ?: return deny("실제 계량기 숫자를 먼저 확인해 주세요.")
         val sameDayCheck = data.observations.lastOrNull { it.meter == data.profile.meter &&
             it.time <= time && dateOf(it.time) == date }
-        val reading = floor(sameDayCheck?.reading ?: (Estimator.estimate(data, time).reading
+        val reading = SubmissionReading.floor(sameDayCheck?.reading ?: (Estimator.estimate(data, time).reading
             ?: return deny("제출할 지침을 계산할 수 없어요.")))
         if (!reading.isFinite() || reading < target.previousValue || reading > 99_999_999) return deny("이전 지침과 제출값을 확인해 주세요.")
         return SubmissionDecision(true, reading, "검침 기간과 기존 제출 여부를 확인했어요.")
