@@ -36,8 +36,8 @@ class AlphaReliabilityTest {
         MockWebServer().use { server ->
             server.start()
             server.enqueue(MockResponse().setBody("{}"))
-            server.enqueue(MockResponse().setBody("{\"list\":[]}"))
-            SkensClient(Providers.get("busan"), Credentials("synthetic", "synthetic")).use { client ->
+            repeat(3) { server.enqueue(MockResponse().setBody("{\"list\":[]}")) }
+            SkensClient(Providers.get("busan"), Credentials("synthetic", "synthetic"), verificationPause = {}).use { client ->
                 val local = OkHttpClient.Builder().retryOnConnectionFailure(false).followRedirects(false)
                     .callTimeout(3, TimeUnit.SECONDS).addInterceptor { chain ->
                         chain.proceed(chain.request().newBuilder().url(server.url(chain.request().url.encodedPath)).build())
@@ -48,7 +48,9 @@ class AlphaReliabilityTest {
                     Contract("synthetic-bp", "synthetic-ca"), "synthetic-meter", "", date, "synthetic", "synthetic")
                 val result = runCatching { client.submitReading(target, 110.0) }.getOrNull()
                 println("issue49 result=$result requests=${server.requestCount}")
-                assertEquals("Unknown reply must trigger the receipt read rather than an immediate rejection", 2, server.requestCount)
+                assertEquals("Unknown reply must trigger bounded receipt reads rather than an immediate rejection", 4, server.requestCount)
+                assertEquals("/busan/read/insertSelfRead.do", server.takeRequest().path)
+                repeat(3) { assertEquals("/busan/read/call_EBPP_018.do", server.takeRequest().path) }
                 assertEquals("uncertain", result?.status)
             }
         }

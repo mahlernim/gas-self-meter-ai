@@ -44,8 +44,8 @@ class ProviderSafetyRegressionTest {
         MockWebServer().use { server ->
             server.start()
             server.enqueue(MockResponse().setResponseCode(503).setHeader("Retry-After", "0"))
-            server.enqueue(json("{\"result\":\"N\"}"))
-            SkensClient(Providers.get("busan"), Credentials("synthetic", "synthetic")).use { api ->
+            repeat(3) { server.enqueue(json("{\"list\":[]}")) }
+            SkensClient(Providers.get("busan"), Credentials("synthetic", "synthetic"), verificationPause = {}).use { api ->
                 val local = transport().newBuilder().addInterceptor { chain ->
                     chain.proceed(chain.request().newBuilder().url(server.url(chain.request().url.encodedPath)).build())
                 }.build()
@@ -57,8 +57,9 @@ class ProviderSafetyRegressionTest {
             }
             val requests = List(server.requestCount) { server.takeRequest() }
             println("skens503 paths=" + requests.map { it.path })
-            assertEquals("Only one mutation is allowed, followed by a read-only receipt POST", listOf(
-                "/busan/read/insertSelfRead.do", "/busan/read/call_EBPP_018.do"), requests.map { it.path })
+            assertEquals("Only one mutation is allowed, followed by three bounded read-only receipt checks", listOf(
+                "/busan/read/insertSelfRead.do", "/busan/read/call_EBPP_018.do",
+                "/busan/read/call_EBPP_018.do", "/busan/read/call_EBPP_018.do"), requests.map { it.path })
         }
     }
 

@@ -56,6 +56,7 @@ object DataCodec {
             put("cycle", record.cycle); put("periodStart", record.periodStart); put("periodEnd", record.periodEnd)
             put("value", record.value); put("attemptedAt", record.attemptedAt)
             put("status", record.status); put("detail", record.detail)
+            record.confirmationSource?.let { put("confirmationSource", it) }
         }) } })
         if (includeCredentials) data.cachedSelfRead?.let { t -> put("cachedSelfRead", JSONObject().apply {
             put("cycle", t.cycle); put("start", t.start); put("end", t.end)
@@ -124,7 +125,8 @@ object DataCodec {
                 SubmissionRecord(row.getString("cycle").take(80), LocalDate.parse(row.getString("periodStart")).toString(),
                     LocalDate.parse(row.getString("periodEnd")).toString(), row.getDouble("value").also { require(it.isFinite() && it in 0.0..99_999_999.0) },
                     row.getLong("attemptedAt"), row.getString("status").also { require(it in setOf("pending", "confirmed", "uncertain", "rejected")) },
-                    row.optString("detail").take(300))
+                    row.optString("detail").take(300),
+                    row.optionalString("confirmationSource")?.also { require(it in setOf("provider_response", "readback")) })
             }
         }
         val cached = if (allowCredentials) json.optJSONObject("cachedSelfRead")?.let { t ->
