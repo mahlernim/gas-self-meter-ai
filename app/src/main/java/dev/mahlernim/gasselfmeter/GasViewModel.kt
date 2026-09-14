@@ -324,21 +324,32 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
         if (data.energyTalkConnection != null) { gasappAction("검침 기간과 제출 상태를 확인하는 중") { EnergyTalkBridge.checkStatus(getApplication()) }; return }
         if (Providers.get(data.profile.providerId).samchully) { gasappAction("검침 기간과 제출 상태를 확인하는 중") { SamchullyBridge.checkStatus(getApplication()) }; return }
         if (data.gasappConnection != null) { gasappAction("검침 기간과 제출 상태를 확인하는 중") { GasappBridge.checkStatus(getApplication()) }; return }
-        val credentials = data.credentials ?: run { message = "자동 입력을 사용하려면 설정에서 로그인 정보를 암호화해 저장해 주세요."; return }
+        if (data.credentials == null) { message = "자동 입력을 사용하려면 설정에서 로그인 정보를 암호화해 저장해 주세요."; return }
+        val reviewed = data
         busy = true; setProgress(0, 3, "검침 기간을 확인하려고 로그인하는 중")
         viewModelScope.launch {
             try {
-                selfReadTarget = withContext(Dispatchers.IO) { SubmissionGate.lock.withLock {
-                    val provider = Providers.skens(data.profile.providerId)
-                    SkensClient(provider, credentials).use { client ->
-                        val contract = client.login().find { SkensClient.contractKey(provider, it) == data.profile.contract }
+                var reconciled = false
+                val saved = withContext(Dispatchers.IO) { SubmissionGate.lock.withLock {
+                    val current = store.read()
+                    check(BackgroundState.sameAccount(current, reviewed)) { "확인할 계정이나 계량기가 바뀌었어요. 다시 확인해 주세요." }
+                    val currentCredentials = current.credentials ?: error("자동 입력을 사용하려면 설정에서 로그인 정보를 암호화해 저장해 주세요.")
+                    val provider = Providers.skens(current.profile.providerId)
+                    SkensClient(provider, currentCredentials).use { client ->
+                        val contract = client.login().find { SkensClient.contractKey(provider, it) == current.profile.contract }
                             ?: error("저장된 계약을 찾지 못했어요. 공급사를 다시 연결해 주세요.")
                         viewModelScope.launch { setProgress(1, 3, "계약과 계량기를 확인하는 중") }
-                        client.selfReadTarget(contract)
+                        val target = client.selfReadTarget(contract)
+                        store.update { latest ->
+                            check(BackgroundState.sameAccount(latest, current)) { "확인 중 계정이나 계량기가 바뀌었어요. 다시 확인해 주세요." }
+                            reconciled = SkensReconciliation.reconciledRecord(latest, target) != null
+                            SkensReconciliation.apply(latest, target).copy(cachedSelfRead = target)
+                        }
                     }
                 } }
-                save(data.copy(cachedSelfRead = selfReadTarget))
+                publish(saved)
                 setProgress(3, 3, "검침 기간 확인을 마쳤어요")
+                message = if (reconciled) "공급사에서 제출 완료를 확인했어요." else "공급사 제출 상태를 확인했어요."
             } catch (e: Exception) { message = reportError(e) }
             finally { busy = false }
         }
@@ -379,17 +390,28 @@ class GasViewModel(app: Application) : AndroidViewModel(app) {
                                 check(BackgroundState.sameAccount(latest, current)) { "계정 정보가 변경되었어요." }
                                 val latestDecision = SubmissionPolicy.decide(latest, target, System.currentTimeMillis(), automatic = false)
                                 check(latestDecision.allowed && latestDecision.value == decision.value) { latestDecision.reason }
-                                latest.copy(submissions = (latest.submissions.filterNot { it.cycle == target.cycle } + record!!).takeLast(100))
+                                // Retain the exact pre-transmission target for a later, fail-closed receipt check.
+                                latest.copy(submissions = (latest.submissions.filterNot { it.cycle == target.cycle } + record!!).takeLast(100),
+                                    cachedSelfRead = target)
                             }
                             viewModelScope.launch { setProgress(2, 4, "검침값을 한 번만 전송하는 중") }
                             val outcome = client.submitReading(target, value)
                             val status = outcome.status
                             val detail = when (status) {
-                                "confirmed" -> "공급사에서 입력 완료를 확인했어요."
+                                "confirmed" -> when (outcome.confirmationSource) {
+                                    "provider_response" -> "공급사 응답으로 ${SubmissionReading.wire(value)} m³ 제출을 완료했어요."
+                                    "readback" -> "공급사 재조회에서 ${SubmissionReading.wire(value)} m³ 제출을 확인했어요."
+                                    else -> "공급사에서 입력 완료를 확인했어요."
+                                }
                                 "rejected" -> "공급사가 입력을 받지 않았어요."
-                                else -> "응답은 성공이지만 재조회 확인이 필요해요. 자동 재전송하지 않습니다."
+                                else -> when {
+                                    outcome.accepted -> "공급사가 요청을 받았다고 응답했지만 제출 완료는 아직 확인되지 않았어요. 자동 재전송하지 않습니다."
+                                    outcome.responseReceived -> "공급사 응답에서 제출 완료를 확인하지 못했어요. 자동 재전송하지 않습니다."
+                                    else -> "공급사 응답을 받지 못해 제출 결과를 확인 중이에요. 자동 재전송하지 않습니다."
+                                }
                             }
-                            store.update { BackgroundState.finish(it, current, record!!.copy(status = status, detail = detail)) }
+                            store.update { BackgroundState.finish(it, current, record!!.copy(status = status, detail = detail,
+                                confirmationSource = outcome.confirmationSource)) }
                         }
                     } finally { SubmissionGate.lock.unlock() }
                 }

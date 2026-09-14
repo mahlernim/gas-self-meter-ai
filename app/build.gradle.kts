@@ -9,9 +9,10 @@ android {
         applicationId = "dev.mahlernim.gasselfmeter"
         minSdk = 26
         targetSdk = 36
-        versionCode = 17
-        versionName = "0.6.2"
+        versionCode = 18
+        versionName = "0.6.3"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField("boolean", "BUSAN_DIAGNOSTIC_WRITE_ENABLED", "false")
     }
     buildFeatures { compose = true; buildConfig = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
@@ -25,6 +26,12 @@ android {
         }
     }
     buildTypes {
+        create("diagnostic") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".diagnostic"
+            versionNameSuffix = "-busan-diagnostic"
+            buildConfigField("boolean", "BUSAN_DIAGNOSTIC_WRITE_ENABLED", "false")
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true

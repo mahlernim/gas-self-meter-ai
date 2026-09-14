@@ -73,6 +73,18 @@ private val Teal = Color(0xFF006C67)
 private val DeepTeal = Color(0xFF053F49)
 private val Coral = Color(0xFFFF845F)
 private val Paper = Color(0xFFF7F8F4)
+
+/** A local confirmation can fill a stale portal display, but never replaces an actual portal value. */
+internal fun currentSkensConfirmation(data: AppData, target: SelfReadTarget?): SubmissionRecord? {
+    val current = target ?: return null
+    val provider = Providers.get(data.profile.providerId)
+    if (!provider.skens || SkensClient.contractKey(provider, current.contract) != data.profile.contract) return null
+    if (current.serial.isBlank() || SkensClient.opaque(current.serial) != data.profile.meter) return null
+    return data.submissions.lastOrNull { record ->
+        record.status == "confirmed" && record.confirmationSource in setOf("provider_response", "readback") &&
+            record.cycle == current.cycle && record.periodStart == current.start && record.periodEnd == current.end
+    }
+}
 private val Ink = Color(0xFF192F32)
 private val Muted = Color(0xFF526968)
 private val Pale = Color(0xFFE4F0EB)
@@ -284,7 +296,14 @@ private sealed interface Confirmation {
         confirmButton = { TextButton(onClick = { refreshConfirmation = false; vm.refresh() }) { Text("갱신 실행") } },
         dismissButton = { TextButton(onClick = { refreshConfirmation = false }) { Text("취소") } })
     calibration?.let { initial -> CalibrationDialog(initial, estimate, vm.busy, { calibration = null }) { value, result ->
-        vm.calibrate(value) { error -> result(error); if (error == null) calibration = null }
+        vm.calibrate(value) { error ->
+            result(error)
+            if (error == null) {
+                // Include the newly saved observation before the next periodic clock tick.
+                now = System.currentTimeMillis()
+                calibration = null
+            }
+        }
     } }
     submitValue?.let { value ->
         val provider = Providers.get(data.profile.providerId)
@@ -652,6 +671,7 @@ private sealed interface Confirmation {
     val periodEnd = if (useGasapp) gasappTarget?.end else target?.end
     val submitted = if (useGasapp) gasappTarget?.submitted == true else target?.submitted == true
     val submittedValue = if (useGasapp) gasappTarget?.submittedValue else target?.submittedValue
+    val localConfirmed = if (submitted || useGasapp) null else currentSkensConfirmation(data, target)
     val demoDate = dateOf(now)
     val demoValue = if (demo) estimate.reading?.let(SubmissionReading::floor) else null
     Page {
@@ -672,6 +692,7 @@ private sealed interface Confirmation {
                 if (periodStart != null && periodEnd != null) Text("$periodStart ~ $periodEnd", color = Muted, style = MaterialTheme.typography.bodySmall)
                 when {
                     submitted -> Text(submittedValue?.let { "입력 완료 · ${submittedReadingText(it)} m³" } ?: "입력 완료", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Teal)
+                    localConfirmed != null -> Text("입력 완료 · ${submittedReadingText(localConfirmed.value)} m³", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Teal)
                     decision.value != null -> Text("입력 예정 ${decimalText(SubmissionReading.floor(decision.value), 0)} m³", fontSize = 28.sp, fontWeight = FontWeight.Bold)
                     else -> Text("아직 입력할 수 없어요", fontSize = 23.sp, fontWeight = FontWeight.Bold)
                 }
@@ -718,6 +739,9 @@ private sealed interface Confirmation {
                 Text("${record.periodStart} ~ ${record.periodEnd}", color = Muted, style = MaterialTheme.typography.labelMedium)
                 Text("${submittedReadingText(record.value)} m³", fontSize = 22.sp, fontWeight = FontWeight.Bold)
                 Text(record.detail, color = if (record.status == "confirmed") Teal else Muted, style = MaterialTheme.typography.bodySmall)
+                if (record.status in setOf("pending", "uncertain")) {
+                    TextButton(onClick = refresh, enabled = !busy) { Text("등록 여부 다시 확인") }
+                }
             }
         }
     }

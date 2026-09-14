@@ -30,13 +30,102 @@ data class SelfReadTarget(
     internal val vLdo: String,
     internal val installation: String,
 )
-data class SubmissionOutcome(val accepted: Boolean, val confirmed: Boolean, val uncertain: Boolean = false) {
-    val status: String get() = when { confirmed -> "confirmed"; accepted || uncertain -> "uncertain"; else -> "rejected" }
+/**
+ * Privacy-safe receipt telemetry for the Busan SK portal. Values from the portal are never
+ * retained here except the submitted meter value and the immediately preceding value.
+ */
+data class BusanTraceEvent(
+    val stage: String,
+    val httpCode: Int? = null,
+    val elapsedMillis: Long? = null,
+    /** Exact non-sensitive integer literal placed in cust_readingresult, for example "41". */
+    val requestWireValue: String? = null,
+    val serverResultCode: String = "unknown",
+    val responseKeys: Set<String> = emptySet(),
+    val submittedValue: Double? = null,
+    val previousValue: Double? = null,
+    val eligible: Boolean? = null,
+    val submitted: Boolean? = null,
+    val submittedValuePresent: Boolean? = null,
+    val submittedValueState: String = "unknown",
+    val rowResultCategory: String = "unknown",
+    val rowResultValue: Double? = null,
+    val previousValueSource: String? = null,
+    val selfReadYn: String = "unknown",
+    val eligibilityYn: String = "unknown",
+    val contractMismatch: Boolean = false,
+    val meterMismatch: Boolean = false,
+    val cycleMismatch: Boolean = false,
+    val datesMismatch: Boolean = false,
+    val plannedMismatch: Boolean = false,
+    val installationMismatch: Boolean = false,
+    val valueMismatch: Boolean = false,
+    val formUsesIsNaN: Boolean = false,
+    val formUsesParseInt: Boolean = false,
+    val formValidatesReading: Boolean = false,
+    val formAcceptsY: Boolean = false,
+    val formRejectsN: Boolean = false,
+    val formAlertMessage: String? = null,
+    val formAlertHash: String? = null,
+    val formMapsGeraetAddr: Boolean = false,
+    val formMapsLegacyAddr: Boolean = false,
+    val formReadRoutes: Set<String> = emptySet(),
+    val formReadParameterKeys: Set<String> = emptySet(),
+    val formReadDomIds: Set<String> = emptySet(),
+    val formReadFunctionNames: Set<String> = emptySet(),
+    val formScriptPaths: Set<String> = emptySet(),
+)
+
+/** Static structure only. Script text, identifiers, and form values are discarded. */
+data class BusanFormEvidence(
+    val usesIsNaN: Boolean,
+    val usesParseInt: Boolean,
+    val validatesReading: Boolean,
+    val acceptsY: Boolean,
+    val rejectsN: Boolean,
+    val genericAlertMessage: String? = null,
+    val genericAlertHash: String? = null,
+    val mapsGeraetAddr: Boolean = false,
+    val mapsLegacyAddr: Boolean = false,
+    val readRoutes: Set<String> = emptySet(),
+    val readParameterKeys: Set<String> = emptySet(),
+    val readDomIds: Set<String> = emptySet(),
+    val readFunctionNames: Set<String> = emptySet(),
+    val scriptPaths: Set<String> = emptySet(),
+)
+
+data class SubmissionReconciliation(
+    val target: SelfReadTarget?,
+    val confirmed: Boolean,
+    val contractMismatch: Boolean = false,
+    val meterMismatch: Boolean = false,
+    val cycleMismatch: Boolean = false,
+    val datesMismatch: Boolean = false,
+    val plannedMismatch: Boolean = false,
+    val installationMismatch: Boolean = false,
+    val valueMismatch: Boolean = false,
+)
+
+data class SubmissionOutcome(
+    val accepted: Boolean,
+    val confirmed: Boolean,
+    val uncertain: Boolean = false,
+    /** False means the submit request did not yield a parseable portal response. */
+    val responseReceived: Boolean = true,
+) {
+    /** `confirmed` means a matching receipt was read back, while accepted follows the portal's Y response. */
+    val status: String get() = when { confirmed || accepted -> "confirmed"; uncertain -> "uncertain"; else -> "rejected" }
+    val confirmationSource: String? get() = when { confirmed -> "readback"; accepted -> "provider_response"; else -> null }
 }
 data class SyncResult(val periods: List<UsagePeriod>, val meter: String, val planned: String?, val warning: String?, val selfRead: SelfReadTarget?)
 
 /** Independent client with an explicit endpoint allowlist and one-shot mutations. */
-class SkensClient(private val provider: Provider, private val credentials: Credentials) : AutoCloseable {
+class SkensClient(
+    private val provider: Provider,
+    private val credentials: Credentials,
+    private val observer: ((BusanTraceEvent) -> Unit)? = null,
+    private val verificationPause: (Long) -> Unit = { millis -> TimeUnit.MILLISECONDS.sleep(millis) },
+) : AutoCloseable {
     init { require(provider.skens && provider.skensCode != null) { "지원하지 않는 자동 연결 공급사예요." } }
     private val cookies = mutableListOf<Cookie>()
     private val client = OkHttpClient.Builder().connectTimeout(20, TimeUnit.SECONDS)
@@ -49,25 +138,56 @@ class SkensClient(private val provider: Provider, private val credentials: Crede
             override fun loadForRequest(url: HttpUrl) = synchronized(cookies) { cookies.filter { it.matches(url) && it.expiresAt > System.currentTimeMillis() } }
         }).build()
     private val allowed = setOf("login/login.do", "login/loginProcess.do", "read/selfRead.do", "read/call_EBPP_018.do", "read/insertSelfRead.do", "charge/askDetail.do")
-    private fun request(path: String, data: Map<String, String>? = null): String {
+    private fun trace(event: BusanTraceEvent) {
+        runCatching { observer?.invoke(event) }
+    }
+    private fun stage(path: String) = when {
+        path == "read/insertSelfRead.do" -> "submit_response"
+        path == "read/call_EBPP_018.do" -> "meter"
+        path.startsWith("login/") -> "login"
+        path.startsWith("charge/") -> "history"
+        else -> "portal"
+    }
+    private fun safeResponseKeys(body: String): Set<String> = runCatching {
+        val objectBody = JSONObject(body)
+        objectBody.keys().asSequence().filter { it.matches(Regex("[A-Za-z][A-Za-z0-9_]{0,63}")) }.toSet()
+    }.getOrDefault(emptySet())
+    private fun safeResultCode(body: String): String = runCatching { JSONObject(body).optString("result").trim().uppercase() }
+        .getOrNull()?.takeIf { it in setOf("Y", "N") } ?: "unknown"
+    private fun request(path: String, data: Map<String, String>? = null, requestWireValue: String? = null): String {
         require(path in allowed)
+        val requestStage = stage(path)
+        val started = System.nanoTime()
         val builder = Request.Builder().url("https://ebpp.skens.com/${provider.id}/$path")
             .header("Referer", "https://ebpp.skens.com/${provider.id}/main/index.do")
         if (data != null) {
             val body = FormBody.Builder().apply { data.forEach { (k, v) -> add(k, v) } }.build()
             builder.post(if (path == "read/insertSelfRead.do" || path == "login/loginProcess.do") body.oneShot() else body)
         }
-        return client.newCall(builder.build()).execute().use { response ->
-            if (!response.isSuccessful) throw ProviderFailure(when {
+        return try {
+            client.newCall(builder.build()).execute().use { response ->
+                val elapsed = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
+                if (!response.isSuccessful) {
+                    trace(BusanTraceEvent(requestStage, response.code, elapsed, requestWireValue))
+                    throw ProviderFailure(when {
                 path.startsWith("login/") -> "login"
                 path.startsWith("charge/") -> "bills"
                 path == "read/insertSelfRead.do" -> "submit"
                 else -> "meter"
-            }, if (response.code in setOf(401, 403)) "authentication" else "http", response.code)
-            val body = response.body ?: error("조회 결과가 비어 있어요.")
-            check(body.contentLength() <= 4_000_000) { "조회 결과가 예상보다 커요." }
-            val bytes = body.byteStream().readBytesLimited(4_000_000)
-            String(bytes, Charsets.UTF_8)
+                    }, if (response.code in setOf(401, 403)) "authentication" else "http", response.code)
+                }
+                val body = response.body ?: error("조회 결과가 비어 있어요.")
+                check(body.contentLength() <= 4_000_000) { "조회 결과가 예상보다 커요." }
+                val text = String(body.byteStream().readBytesLimited(4_000_000), Charsets.UTF_8)
+                trace(BusanTraceEvent(requestStage, response.code, elapsed, requestWireValue,
+                    safeResultCode(text), safeResponseKeys(text)))
+                text
+            }
+        } catch (error: Throwable) {
+            // HTTP failures are traced above. Transport failures intentionally have no synthetic code.
+            if (error !is ProviderFailure) trace(BusanTraceEvent(requestStage,
+                elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started), requestWireValue = requestWireValue))
+            throw error
         }
     }
     fun login(): List<Contract> {
@@ -76,12 +196,71 @@ class SkensClient(private val provider: Provider, private val credentials: Crede
         // Classified rather than a bare check so background work can tell a rejected password from
         // a transient failure and stop replaying the stored credentials.
         if (result.optString("errCd") != "S") throw ProviderFailure("login", "authentication")
-        return parseContracts(request("read/selfRead.do")).also { check(it.isNotEmpty()) { "연결된 계약이 없어요. 공급사 홈페이지에서 사용 계약을 확인해 주세요." } }
+        val page = request("read/selfRead.do")
+        inspectSelfReadForm(page)
+        return parseContracts(page).also { check(it.isNotEmpty()) { "연결된 계약이 없어요. 공급사 홈페이지에서 사용 계약을 확인해 주세요." } }
+    }
+    /**
+     * Inspects already-loaded portal markup. Calling the public overload issues only the existing
+     * read-only self-read page request, and is useful when a diagnostic screen needs fresh evidence.
+     */
+    fun inspectSubmissionForm(): BusanFormEvidence = inspectSelfReadForm(request("read/selfRead.do"))
+    /** Compatibility name for callers that describe the page rather than its submission form. */
+    fun inspectSelfReadForm(): BusanFormEvidence = inspectSubmissionForm()
+    private fun inspectSelfReadForm(html: String): BusanFormEvidence {
+        val evidence = analyzeSelfReadForm(html)
+        trace(BusanTraceEvent("form_validation", formUsesIsNaN = evidence.usesIsNaN,
+            formUsesParseInt = evidence.usesParseInt, formValidatesReading = evidence.validatesReading,
+            formAcceptsY = evidence.acceptsY, formRejectsN = evidence.rejectsN,
+            formAlertMessage = evidence.genericAlertMessage, formAlertHash = evidence.genericAlertHash,
+            formMapsGeraetAddr = evidence.mapsGeraetAddr, formMapsLegacyAddr = evidence.mapsLegacyAddr,
+            formReadRoutes = evidence.readRoutes, formReadParameterKeys = evidence.readParameterKeys,
+            formReadDomIds = evidence.readDomIds, formReadFunctionNames = evidence.readFunctionNames,
+            formScriptPaths = evidence.scriptPaths))
+        return evidence
     }
     private fun meterRow(contract: Contract): JSONObject {
         val meterRows = JSONObject(request("read/call_EBPP_018.do", mapOf("CANO" to contract.ca, "BPNO" to contract.bp, "V" to System.currentTimeMillis().toString()))).getJSONArray("list")
+        val row = if (meterRows.length() == 1) meterRows.getJSONObject(0) else null
+        traceMeterSchema(row)
         check(meterRows.length() == 1) { "계량기가 여러 개이거나 없어요. 이번 버전에서는 직접 입력을 이용해 주세요." }
-        return meterRows.getJSONObject(0)
+        return row!!
+    }
+    private fun safeYn(value: String) = value.trim().uppercase().takeIf { it in setOf("Y", "N") } ?: "unknown"
+    private fun traceMeterSchema(row: JSONObject?) {
+        val keys = row?.keys()?.asSequence()?.filter { it.matches(Regex("[A-Za-z][A-Za-z0-9_]{0,63}")) }?.toSet().orEmpty()
+        val previousSource = listOf("LAST_READINGRESULT", "HT_READINGRESULT").firstOrNull { key ->
+            row?.has(key) == true && !row.isNull(key)
+        }
+        trace(BusanTraceEvent("meter_schema", responseKeys = keys,
+            submittedValuePresent = row?.has("CUST_READING_RESULT") == true && !row.isNull("CUST_READING_RESULT"),
+            submittedValueState = submittedValueState(row), rowResultCategory = rowResultCategory(row),
+            rowResultValue = rowResultValue(row),
+            previousValueSource = previousSource,
+            selfReadYn = safeYn(row?.optString("SELF_READ_YN").orEmpty()),
+            eligibilityYn = safeYn(row?.optString("selfReadYn").orEmpty())))
+    }
+    private fun submittedValueState(row: JSONObject?): String {
+        if (row?.has("CUST_READING_RESULT") != true || row.isNull("CUST_READING_RESULT")) return "absent"
+        val raw = row.optString("CUST_READING_RESULT").trim().replace(",", "")
+        if (raw.isEmpty()) return "empty"
+        val number = raw.toDoubleOrNull() ?: return "non_numeric"
+        return when { number > 0 -> "positive"; number == 0.0 -> "zero"; else -> "non_numeric" }
+    }
+    private fun rowResultCategory(row: JSONObject?): String {
+        val raw = row?.optString("RESULT")?.trim().orEmpty()
+        if (raw.isEmpty()) return "empty"
+        if (raw.matches(Regex("[+-]?\\d+(?:\\.\\d+)?"))) return "numeric"
+        return raw.uppercase().takeIf { it in setOf("Y", "N", "S", "E") } ?: "other"
+    }
+    private fun rowResultValue(row: JSONObject?): Double? = row?.optString("RESULT")?.trim()?.toDoubleOrNull()
+        ?.takeIf { it.isFinite() && it in 0.0..99_999_999.0 }
+    private fun address(row: JSONObject): String {
+        val primary = row.optString("GERAET_ADDR").takeIf { it.isNotBlank() && it != "NULL" }
+        val legacy = row.optString("ADDR").takeIf { it.isNotBlank() && it != "NULL" }
+        check(primary != null || legacy != null) { "계량기 주소 정보 형식이 바뀌었어요." }
+        check(primary == null || legacy == null || primary == legacy) { "계량기 주소 정보가 일치하지 않아요." }
+        return primary ?: legacy!!
     }
     private fun serial(row: JSONObject): String {
         val meterA = row.optString("CERAET").takeIf { it.isNotBlank() && it != "NULL" }
@@ -107,12 +286,23 @@ class SkensClient(private val provider: Provider, private val credentials: Crede
                 meterRow.optString("SELF_READ_YN").trim().uppercase() in setOf("Y", "N"),
             submitted = meterRow.optString("SELF_READ_YN").equals("Y", true) || submittedValue != null,
             submittedValue = submittedValue, previousValue = previous, contract = contract, serial = serial,
-            address = meterRow.optString("ADDR"), planned = meterRow.optString("ADATSOLL1"),
+            address = address(meterRow), planned = meterRow.optString("ADATSOLL1"),
             vLdo = meterRow.optString("V_LDO"), installation = meterRow.optString("ANLAGE")
         )
     }
-    fun selfReadTarget(contract: Contract): SelfReadTarget = parseSelfReadTarget(meterRow(contract), contract)
-        ?: error("공급사에서 검침 가능 기간을 제공하지 않았어요.")
+    fun selfReadTarget(contract: Contract): SelfReadTarget {
+        val row = meterRow(contract)
+        val target = parseSelfReadTarget(row, contract)
+            ?: error("공급사에서 검침 가능 기간을 제공하지 않았어요.")
+        trace(BusanTraceEvent("meter_state", submittedValue = target.submittedValue, previousValue = target.previousValue,
+            eligible = target.eligible, submitted = target.submitted,
+            submittedValuePresent = row.has("CUST_READING_RESULT") && !row.isNull("CUST_READING_RESULT"),
+            submittedValueState = submittedValueState(row), rowResultCategory = rowResultCategory(row),
+            rowResultValue = rowResultValue(row),
+            previousValueSource = listOf("LAST_READINGRESULT", "HT_READINGRESULT").firstOrNull { row.has(it) && !row.isNull(it) },
+            selfReadYn = safeYn(row.optString("SELF_READ_YN")), eligibilityYn = safeYn(row.optString("selfReadYn"))))
+        return target
+    }
     fun history(contract: Contract, knownMonths: Set<String> = emptySet(), progress: (HistoryProgress) -> Unit): SyncResult {
         val meterRow = meterRow(contract)
         val meter = opaque(serial(meterRow))
@@ -149,33 +339,135 @@ class SkensClient(private val provider: Provider, private val credentials: Crede
         return SyncResult(periods.sortedBy { it.start }, meter, planned,
             if (failed > 0) "$failed 개월은 읽지 못했어요. 기존 이력은 유지했고, 다시 새로고침할 수 있어요." else null, target)
     }
+    fun reconcile(target: SelfReadTarget, value: Double): SubmissionReconciliation {
+        val refreshed = runCatching { selfReadTarget(target.contract) }.getOrNull()
+        val result = reconciliation(target, refreshed, value)
+        trace(BusanTraceEvent("reconcile", submittedValue = refreshed?.submittedValue, previousValue = refreshed?.previousValue,
+            eligible = refreshed?.eligible, submitted = refreshed?.submitted, contractMismatch = result.contractMismatch,
+            meterMismatch = result.meterMismatch, cycleMismatch = result.cycleMismatch,
+            datesMismatch = result.datesMismatch, plannedMismatch = result.plannedMismatch,
+            installationMismatch = result.installationMismatch, valueMismatch = result.valueMismatch))
+        return result
+    }
     fun submitReading(target: SelfReadTarget, value: Double): SubmissionOutcome {
         val reading = SubmissionReading.wire(value)
         require(target.eligible) { "자가검침 대상 계약이 아니에요." }
         require(!target.submitted) { "이번 검침값은 이미 제출되어 있어요." }
         require(today() in LocalDate.parse(target.start)..LocalDate.parse(target.end)) { "현재는 검침값 입력 기간이 아니에요." }
         require(target.previousValue != null && target.previousValue.isFinite() && value >= target.previousValue) { "이전 검침값과 제출할 값을 확인해 주세요." }
+        trace(BusanTraceEvent("submit_dispatch", requestWireValue = reading, submittedValue = value,
+            previousValue = target.previousValue, eligible = target.eligible, submitted = target.submitted))
         val response = runCatching { JSONObject(request("read/insertSelfRead.do", mapOf(
             "bpno" to target.contract.bp, "name" to target.contract.name, "cano" to target.contract.ca,
             "sernr" to target.serial, "addr" to target.address,
             "cust_readingresult" to reading, "adatsoll1" to target.planned,
             "v_ldo" to target.vLdo, "anlage" to target.installation
-        ))) }.getOrNull()
-        val result = response?.optString("result")?.trim()
-        if (result == "N") return SubmissionOutcome(false, false)
-        val refreshed = runCatching { selfReadTarget(target.contract) }.getOrNull()
-        val confirmed = refreshed != null && confirmsSubmission(target, refreshed, value)
-        return SubmissionOutcome(result == "Y", confirmed, uncertain = !confirmed)
+        ), reading)) }.onFailure {
+            trace(BusanTraceEvent("submit_failure", requestWireValue = reading, submittedValue = value))
+        }.getOrNull()
+        val result = response?.optString("result")?.trim()?.uppercase()?.takeIf { it in setOf("Y", "N") }
+        if (result == "N") return SubmissionOutcome(false, false, responseReceived = true)
+        // A portal Y is the same successful outcome shown by the official web page. The app's
+        // ordinary path returns promptly while an attached diagnostic observer may collect receipts.
+        if (result == "Y" && observer == null) return SubmissionOutcome(true, false, responseReceived = true)
+        // A single mutation is followed by at most three bounded, read-only receipt checks.
+        var confirmed = false
+        for (pause in listOf(0L, 2_000L, 3_000L)) {
+            if (pause > 0) verificationPause(pause)
+            if (reconcile(target, value).confirmed) {
+                confirmed = true
+                break
+            }
+        }
+        return SubmissionOutcome(result == "Y", confirmed, uncertain = !confirmed && result != "N",
+            responseReceived = response != null)
     }
     override fun close() { synchronized(cookies) { cookies.clear() }; client.connectionPool.evictAll(); client.dispatcher.executorService.shutdown() }
 
     companion object {
+        internal fun analyzeSelfReadForm(html: String): BusanFormEvidence {
+            // The page itself is never persisted or exposed. Restrict analysis to script structure.
+            val scripts = Jsoup.parse(html).select("script").joinToString("\n") { it.data() }
+            val readingContext = Regex("(?is).{0,240}cust_readingresult.{0,240}").findAll(scripts).map { it.value }.toList()
+            val usesIsNaN = readingContext.any { Regex("\\bisNaN\\s*\\(").containsMatchIn(it) }
+            val usesParseInt = readingContext.any { Regex("\\bparseInt\\s*\\(").containsMatchIn(it) }
+            val validatesReading = usesIsNaN || usesParseInt
+            val submitContext = Regex("(?is).{0,500}(?:insertSelfRead|result).{0,500}").findAll(scripts).map { it.value }.toList()
+            val acceptsY = submitContext.any { Regex("(?:result|data\\.result)\\s*(?:===|==)\\s*['\"]Y['\"]").containsMatchIn(it) }
+            val rejectsN = submitContext.any { Regex("(?:result|data\\.result)\\s*(?:===|==)\\s*['\"]N['\"]").containsMatchIn(it) }
+            val formScripts = Jsoup.parse(html).select("script").map { it.data() }
+                .filter { it.contains("cust_readingresult") || it.contains("insertSelfRead") }
+                .joinToString("\n")
+            val alert = Regex("alert\\s*\\(\\s*['\"]([^'\"\\r\\n]{1,120})['\"]\\s*\\)").findAll(formScripts)
+                .map { it.groupValues[1].trim() }
+                .firstOrNull { it in setOf("저장하였습니다.") }
+            val mapsGeraetAddr = Regex("\\bGERAET_ADDR\\b").containsMatchIn(formScripts)
+            val mapsLegacyAddr = Regex("\\bADDR\\b").containsMatchIn(formScripts)
+            val structure = analyzeReadStructure(html)
+            return BusanFormEvidence(usesIsNaN, usesParseInt, validatesReading, acceptsY, rejectsN,
+                alert, alert?.let(::opaque), mapsGeraetAddr, mapsLegacyAddr,
+                structure.routes, structure.parameterKeys, structure.domIds, structure.functionNames, structure.scriptPaths)
+        }
+
+        /** Structural metadata only. It never returns script text, values, identifiers, or credentials. */
+        private data class ReadStructure(
+            val routes: Set<String>, val parameterKeys: Set<String>, val domIds: Set<String>,
+            val functionNames: Set<String>, val scriptPaths: Set<String>,
+        )
+        private fun analyzeReadStructure(html: String): ReadStructure {
+            val doc = Jsoup.parse(html)
+            val inline = doc.select("script:not([src])").joinToString("\n") { it.data() }
+            val literals = Regex("['\"]([^'\"\\r\\n]{1,160})['\"]").findAll(inline).map { it.groupValues[1] }.toList()
+            val routes = literals.mapNotNull(::safeReadRoute).toSortedSet().take(16).toSet()
+            val routeContext = routes.flatMap { route ->
+                Regex("(?is).{0,400}" + Regex.escape(route.removePrefix("/")) + ".{0,400}").findAll(inline).map { it.value }.toList()
+            }.joinToString("\n")
+            val parameterKeys = Regex("(?:[,{]\\s*)([A-Za-z_][A-Za-z0-9_]{0,47})\\s*:").findAll(routeContext)
+                .map { it.groupValues[1] }.filter(::safeParameterKey).toSortedSet().take(24).toSet()
+            val domIds = Regex("(?:getElementById\\s*\\(\\s*|\\$\\s*\\(\\s*)['\"]#?([A-Za-z][A-Za-z0-9_-]{0,63})['\"]")
+                .findAll(inline).map { it.groupValues[1] }.filter { id -> id.contains(Regex("(?i)(read|result|meter|geraet)")) }
+                .toSortedSet().take(16).toSet()
+            val functionNames = Regex("(?:\\bfunction\\s+|\\b(?:var|let|const)?\\s*)([A-Za-z_$][A-Za-z0-9_$]{0,63})\\s*(?:=\\s*function\\b|\\()")
+                .findAll(inline).map { it.groupValues[1] }.filter { name -> name.contains(Regex("(?i)(read|result|meter|call|ask|search)")) }
+                .toSortedSet().take(16).toSet()
+            val scriptPaths = doc.select("script[src]").mapNotNull { safeOfficialScriptPath(it.attr("src")) }.toSortedSet().take(16).toSet()
+            return ReadStructure(routes, parameterKeys, domIds, functionNames, scriptPaths)
+        }
+        private fun safeReadRoute(value: String): String? {
+            val path = when {
+                value.matches(Regex("(?:call|ask|get|search)[A-Za-z0-9_-]*\\.do", RegexOption.IGNORE_CASE)) -> "/read/$value"
+                value.matches(Regex("(?:[A-Za-z0-9_-]+/){1,5}[A-Za-z0-9_-]+\\.do")) -> "/$value"
+                value.matches(Regex("/(?:[A-Za-z0-9_-]+/){0,5}[A-Za-z0-9_-]+\\.do")) -> value
+                value.matches(Regex("https://ebpp\\.skens\\.com/(?:[A-Za-z0-9_-]+/){1,6}[A-Za-z0-9_-]+\\.do")) -> "/" + value.substringAfter("ebpp.skens.com/")
+                else -> return null
+            }
+            return path.takeIf { it.matches(Regex("/(?:[A-Za-z0-9_-]+/)*read/[A-Za-z0-9_-]+\\.do")) &&
+                !it.contains(Regex("(?i)(insert|save|delete|update|cancel)")) }
+        }
+        private fun safeParameterKey(value: String): Boolean = value.matches(Regex("[A-Za-z_][A-Za-z0-9_]{0,47}")) &&
+            !value.contains(Regex("(?i)(password|passwd|token|cookie|session|auth|^pw$|^id$)"))
+        private fun safeOfficialScriptPath(value: String): String? {
+            val path = when {
+                value.matches(Regex("/(?:[A-Za-z0-9._-]+/){0,6}[A-Za-z0-9._-]+\\.js")) -> value
+                value.matches(Regex("https://ebpp\\.skens\\.com/(?:[A-Za-z0-9._-]+/){0,6}[A-Za-z0-9._-]+\\.js")) -> "/" + value.substringAfter("ebpp.skens.com/")
+                else -> return null
+            }
+            return path.takeIf { it.length <= 160 }
+        }
+        internal fun reconciliation(target: SelfReadTarget, refreshed: SelfReadTarget?, value: Double): SubmissionReconciliation {
+            if (refreshed == null) return SubmissionReconciliation(null, false, valueMismatch = true)
+            val contractMismatch = refreshed.contract.bp != target.contract.bp || refreshed.contract.ca != target.contract.ca
+            val meterMismatch = refreshed.serial != target.serial
+            val cycleMismatch = refreshed.cycle != target.cycle
+            val datesMismatch = refreshed.start != target.start || refreshed.end != target.end
+            val plannedMismatch = refreshed.planned != target.planned
+            val installationMismatch = refreshed.installation != target.installation
+            val valueMismatch = !refreshed.submitted || refreshed.submittedValue?.let { it.isFinite() && abs(it - value) < .001 } != true
+            return SubmissionReconciliation(refreshed, !(contractMismatch || meterMismatch || cycleMismatch || datesMismatch || plannedMismatch || installationMismatch || valueMismatch),
+                contractMismatch, meterMismatch, cycleMismatch, datesMismatch, plannedMismatch, installationMismatch, valueMismatch)
+        }
         internal fun confirmsSubmission(target: SelfReadTarget, refreshed: SelfReadTarget, value: Double): Boolean =
-            refreshed.contract.bp == target.contract.bp && refreshed.contract.ca == target.contract.ca &&
-                refreshed.serial == target.serial && refreshed.cycle == target.cycle &&
-                refreshed.start == target.start && refreshed.end == target.end &&
-                refreshed.planned == target.planned && refreshed.installation == target.installation &&
-                refreshed.submitted && refreshed.submittedValue?.let { it.isFinite() && abs(it - value) < .001 } == true
+            reconciliation(target, refreshed, value).confirmed
 
         fun contractKey(provider: Provider, contract: Contract) = opaque("${provider.skensCode}:${contract.bp}:${contract.ca}")
         fun parsePortalDate(value: String): String = LocalDate.parse(value.replace('.', '-').replace('/', '-'),

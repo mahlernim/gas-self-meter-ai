@@ -137,11 +137,16 @@ class SubmissionWorker(context: Context, params: WorkerParameters) : Worker(cont
                         val outcome = client.submitReading(current, decision.value)
                         val status = outcome.status
                         text = when (status) {
-                            "confirmed" -> "검침값 ${SubmissionReading.wire(decision.value)} m³ 자동 제출을 완료했어요."
+                            "confirmed" -> when (outcome.confirmationSource) {
+                                "provider_response" -> "공급사 응답으로 검침값 ${SubmissionReading.wire(decision.value)} m³ 자동 제출을 완료했어요."
+                                "readback" -> "공급사 재조회에서 검침값 ${SubmissionReading.wire(decision.value)} m³ 자동 제출을 확인했어요."
+                                else -> "검침값 ${SubmissionReading.wire(decision.value)} m³ 자동 제출을 완료했어요."
+                            }
                             "rejected" -> ReminderPolicy.DEADLINE
                             else -> ReminderPolicy.UNCERTAIN
                         }
-                        store.update { BackgroundState.finish(it, expected, pending!!.copy(status = status, detail = text!!)) }
+                        store.update { BackgroundState.finish(it, expected, pending!!.copy(status = status, detail = text!!,
+                            confirmationSource = outcome.confirmationSource)) }
                         if (status == "confirmed") applicationContext.getSystemService(NotificationManager::class.java).cancel(3)
                     }
                 }

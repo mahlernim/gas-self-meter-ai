@@ -52,7 +52,8 @@ object ProviderRefresh {
                     val keep = latest.periods.filter { old -> old.billMonth !in months && result.periods.none { it.first <= old.last && old.first <= it.last } }
                     val periods = (keep + result.periods).sortedBy { it.start }
                     Estimator.validatePeriods(periods)
-                    latest.copy(profile = latest.profile.copy(meter = result.meter, customerNumber = contract.ca,
+                    val reconciled = SkensReconciliation.apply(latest, result.selfRead)
+                    reconciled.copy(profile = reconciled.profile.copy(meter = result.meter, customerNumber = contract.ca,
                         plannedDate = result.planned, syncTime = System.currentTimeMillis()), periods = periods,
                         cachedSelfRead = result.selfRead)
                 }

@@ -75,6 +75,8 @@ data class SubmissionRecord(
     val attemptedAt: Long,
     val status: String,
     val detail: String,
+    /** `provider_response` is the portal's accepted response. `readback` is a matching later read. */
+    val confirmationSource: String? = null,
 )
 data class AppData(
     val profile: Profile = Profile(), val periods: List<UsagePeriod> = emptyList(),
