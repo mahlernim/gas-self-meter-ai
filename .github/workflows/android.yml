@@ -22,6 +22,8 @@ jobs:
           distribution: temurin
           java-version: '21'
       - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
+        with:
+          packages: platform-tools
       - run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
       # Held at the v5 line: gradle/actions v6 moves caching into the proprietary
       # gradle-actions-caching component, which is not covered by the MIT License.

@@ -181,6 +181,9 @@ class SkensClient(
                 val text = String(body.byteStream().readBytesLimited(4_000_000), Charsets.UTF_8)
                 trace(BusanTraceEvent(requestStage, response.code, elapsed, requestWireValue,
                     safeResultCode(text), safeResponseKeys(text)))
+                // The initial login form is expected. Protected HTML and JSON routes can instead
+                // return HTTP 200 with a login page, before their usual parser gets a chance to run.
+                if (path != "login/login.do") authentication(Jsoup.parse(text), requestStage)
                 text
             }
         } catch (error: Throwable) {
@@ -473,8 +476,16 @@ class SkensClient(
         fun parsePortalDate(value: String): String = LocalDate.parse(value.replace('.', '-').replace('/', '-'),
             if (value.matches(Regex("\\d{8}"))) java.time.format.DateTimeFormatter.BASIC_ISO_DATE else java.time.format.DateTimeFormatter.ISO_LOCAL_DATE).toString()
         fun opaque(text: String) = MessageDigest.getInstance("SHA-256").digest(text.toByteArray()).take(12).joinToString("") { "%02x".format(it) }
+        private val loginRedirect = Regex("""\s*(?:(?:parent|top|window|self)\.)?location\.(?:replace|assign)\(\s*(['"])/[a-zA-Z0-9_-]+/login/login\.do(?:\?[^'"<>]*)?\1\s*\)\s*;?\s*""")
+        private fun authentication(doc: Document, stage: String) {
+            // Match a whole immediate script, not login links or functions on valid portal pages.
+            if (doc.selectFirst("input[type=password]") != null ||
+                doc.select("script").any { loginRedirect.matches(it.data()) }) {
+                throw ProviderFailure(stage, "authentication")
+            }
+        }
         fun document(html: String): Document = Jsoup.parse(html).also {
-            check(it.selectFirst("input[type=password]") == null) { "로그인이 만료됐어요. 다시 로그인해 주세요." }
+            authentication(it, "portal")
             check(!it.title().contains("error", true)) { "도시가스 사이트에서 오류가 발생했어요." }
         }
         fun parseContracts(html: String): List<Contract> {

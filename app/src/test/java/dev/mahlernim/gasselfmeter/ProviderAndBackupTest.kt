@@ -34,7 +34,8 @@ class ProviderAndBackupTest {
         assertEquals("2026-09-17", SkensClient.parsePortalDate("2026.09.17"))
         assertThrows(IllegalStateException::class.java) { SkensClient.parseBill(fixture(), "202502") }
         assertThrows(IllegalStateException::class.java) { SkensClient.parseBill(fixture(current = "121"), "202501") }
-        assertThrows(IllegalStateException::class.java) { SkensClient.parseContracts("<input type='password'>") }
+        val expired = assertThrows(ProviderFailure::class.java) { SkensClient.parseContracts("<input type='password'>") }
+        assertTrue(BackgroundState.rejectedCredentials(expired))
         val contracts = SkensClient.parseContracts("<script>var data={BPNO:'1234'}</script><input id='list_cano_1' value='5678'><input id='list_bpname_1' value='synthetic'><input id='list_cano_2' value='9012'>")
         assertEquals(2, contracts.size)
         assertEquals("synthetic", contracts.first().name)
