@@ -7,6 +7,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DaesungProviderClientTest {
+    private val meterDate = today()
     private fun response(body: String) = MockResponse().setHeader("Content-Type", "text/html; charset=utf-8").setBody(body)
     private fun login() = """<form method="post" action="/users/login"><input name="id"><input type="password" name="password"><input type="hidden" name="csrf" value="fresh"></form>"""
     private fun bills() = """<label for="cust">고객번호</label><select id="cust" name="cust"><option value="123" selected>우리집</option></select>
@@ -14,7 +15,7 @@ class DaesungProviderClientTest {
         <tr><td>2026-08</td><td>12,000원</td><td>9.8㎥</td><td>100</td><td>109.8</td></tr></table>"""
     private fun meter(path: String, submitted: String = ""): String {
         val received = if (submitted.isBlank()) "" else "<tr><th>등록지침</th><td>" + submitted + "</td></tr>"
-        return """<table><tr><th>검침기간</th><td>2026-09-01 ~ 2026-09-30</td></tr><tr><th>전월지침</th><td>109.8</td></tr>
+        return """<table><tr><th>검침기간</th><td>${meterDate.minusDays(1)} ~ ${meterDate.plusDays(1)}</td></tr><tr><th>전월지침</th><td>109.8</td></tr>
             <tr><th>계량기번호</th><td>M-1</td></tr>""" + received + """</table><form method="post" action="""" + path + """/save">
             <label for="cust">고객번호</label><select id="cust" name="cust"><option value="123" selected>우리집</option></select><input type="hidden" name="csrf" value="fresh">
             <label for="reading">당월지침</label><input id="reading" name="reading" value="">
